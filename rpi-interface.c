@@ -26,7 +26,6 @@
 #include <sys/ioctl.h>
 #include <time.h>
 #include <signal.h>
-#include <errno.h>
 
 #include <gpiod.h>
 
@@ -85,7 +84,6 @@ struct config_t
 	uint32_t rx_freq;
 	uint32_t tx_freq;
 	uint8_t afc;
-	uint16_t zmq_port;
 
 	//GPIO Pins
 	uint16_t pa_en;
@@ -344,7 +342,6 @@ int8_t load_config(struct config_t *cfg, char *path)
 	cfg->freq_corr=0;
 	cfg->tx_pwr=10.0f;
 	cfg->afc=0;
-	cfg->zmq_port=0; //0 - disabled
 	cfg->nrst=21;
 	cfg->pa_en=18;
 	cfg->boot0=20;
@@ -435,10 +432,6 @@ int8_t load_config(struct config_t *cfg, char *path)
 				else
 					cfg->afc=0;
 			}
-			else if(strstr(line, "zmq_port")==line)
-			{
-				cfg->zmq_port=atoi(strstr(line, "=")+1);
-			}			
 		}
 
 		fclose(cfg_fp);
@@ -568,7 +561,7 @@ uint8_t gpio_set(uint16_t gpio, uint8_t state)
 	ret = gpiod_line_set_value(line, state ? 1 : 0);
 	// dbg_print(0, "Attempted to set GPIO line %d to %d, gpiod_line_set_value returned %d\n", gpio, state, ret);
 	if (ret < 0) {
-		dbg_print(TERM_RED, "Error setting GPIO line %d value to %d (errno: %d)\n", gpio, state, errno);
+		dbg_print(TERM_RED, "Error setting GPIO line %d value to %d: %s\n", gpio, state, strerror);
 		return 1;
 	}
 	
