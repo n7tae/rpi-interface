@@ -26,8 +26,8 @@
 #include <sys/ioctl.h>
 #include <time.h>
 #include <signal.h>
+#include <errno.h>
 
-#include <zmq.h>
 #include <gpiod.h>
 
 //rpi-interface commands
@@ -1016,23 +1016,6 @@ int main(int argc, char* argv[])
 	lsf_sync_ext[4]=3; lsf_sync_ext[5]=-3; lsf_sync_ext[6]=3; lsf_sync_ext[7]=-3;
 	memcpy(&lsf_sync_ext[8], lsf_sync_symbols, 8);
 
-	//ZMQ
-	dbg_print(0, "ZeroMQ ");
-	if(config.zmq_port!=0)
-	{
-		sprintf(zmq_addr, "tcp://*:%d", config.zmq_port);
-		zmq_ctx = zmq_ctx_new();
-		bsb_downlink = zmq_socket(zmq_ctx, ZMQ_PUB);
-		if(zmq_bind(bsb_downlink, zmq_addr)==0)
-			dbg_print(TERM_GREEN, "OK\n");
-		else
-			dbg_print(TERM_RED, "ERROR\n");
-	}
-	else
-	{
-		dbg_print(TERM_GREEN, "disabled\n");
-	}
-
 	//start RX
 	dev_start_rx();
 	time(&rawtime);
@@ -1058,17 +1041,6 @@ int main(int argc, char* argv[])
 		if(uart_byte_count>0)
 		{
 			read(fd, (uint8_t*)&rx_bsb_sample, 1);
-
-			//publish over ZMQ
-			if(config.zmq_port!=0)
-			{
-				zmq_samp_buff[zmq_samples++]=rx_bsb_sample;
-				if(zmq_samples==ZMQ_RX_BUFF_SIZE)
-				{
-					zmq_send(bsb_downlink, (char*)zmq_samp_buff, ZMQ_RX_BUFF_SIZE, 0);
-					zmq_samples=0;
-				}
-			}
 
 			//push buffer
 			for(uint8_t i=0; i<sizeof(flt_buff)-1; i++)

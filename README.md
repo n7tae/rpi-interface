@@ -2,8 +2,9 @@
 Raspberry Pi interface for the M17 Project's [CC1200 HAT](https://github.com/M17-Project/CC1200_HAT-hw).
 
 ### Building
-To build the code using `make`, first install *libzmq3-dev* and *libgpiod-dev*:<br>
-`sudo apt install libzmq3-dev libgpiod-dev`
+Note that this build does not include a baseband signal, so no *libzmq3-dev* is needed.<br>
+To build the code using `make`, first install *libgpiod-dev*:<br>
+`sudo apt install ibgpiod-dev`
 
 ### Command line arguments
 ```
