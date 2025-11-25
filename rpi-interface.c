@@ -736,7 +736,7 @@ void dev_set_tx_power(float power) //powr in dBm
 
 void dev_start_tx(void)
 {
-	uint8_t cmd[3];
+	uint8_t cmd[2];
 	cmd[0]=CMD_SET_TX_START;	//start tranmission
 	cmd[1]=2;
 	write(fd, cmd, cmd[1]);
@@ -1750,3 +1750,4 @@ int main(int argc, char* argv[])
 	//should never get here	
 	return 0;
 }
+
