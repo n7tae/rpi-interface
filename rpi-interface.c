@@ -949,7 +949,7 @@ int main(int argc, char* argv[])
 		exit(1);
 	}
 	
-	set_blocking(fd, 0);
+	//set_blocking(fd, 0); //not required - VMIN and VTIME values are set with set_interface_attribs() below
 	set_interface_attribs(fd, config.uart_rate, 0);
 	dbg_print(TERM_GREEN, " OK\n");
 
@@ -1750,4 +1750,5 @@ int main(int argc, char* argv[])
 	//should never get here	
 	return 0;
 }
+
 
