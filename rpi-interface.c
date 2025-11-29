@@ -588,115 +588,106 @@ void refl_send(const uint8_t* msg, uint16_t len)
 //device config funcs
 void dev_ping(void)
 {
-	uint8_t cmd[2];
-	cmd[0]=CMD_PING;			//PING
-	cmd[1]=2;
-	write(fd, cmd, cmd[1]);
+	uint8_t cmd[3] = {CMD_PING, 3, 0};
+	write(fd, cmd, 3);
 }
 
 void dev_set_rx_freq(uint32_t freq)
 {
-	uint8_t cmd[6];
-	cmd[0]=CMD_SET_RX_FREQ;		//RX freq
-	cmd[1]=6;
-	*((uint32_t*)&cmd[2])=freq;
-	write(fd, cmd, cmd[1]);
+	uint8_t cmd[3+4] = {CMD_SET_RX_FREQ, 7, 0};
+	memcpy(&cmd[3], (uint8_t*)&freq, 4);
+	write(fd, cmd, 7);
 	
 	//wait for device's response
 	do
 	{
 		ioctl(fd, FIONREAD, &uart_byte_count);
 	}
-	while(uart_byte_count!=3);
-	uint8_t resp[3]={0};
-	read(fd, resp, 3);
+	while(uart_byte_count != 4);
+
+	uint8_t resp[4] = {0};
+	read(fd, resp, 4);
 	
-	if(resp[2]==0)
+	if(resp[3]==0)
 	{
 		dbg_print(0, "RX frequency: ");
 		dbg_print(TERM_GREEN, "%lu Hz\n", config.rx_freq); //OK
 	}
 	else
 	{
-		dbg_print(TERM_YELLOW, "Error %d setting RX frequency: %lu Hz\n", resp[2], config.rx_freq); //error
+		dbg_print(TERM_YELLOW, "Error %d setting RX frequency: %lu Hz\n", resp[3], config.rx_freq); //error
 	}
 }
 
 void dev_set_tx_freq(uint32_t freq)
 {
-	uint8_t cmd[6];
-	cmd[0]=CMD_SET_TX_FREQ;		//TX freq
-	cmd[1]=6;
-	*((uint32_t*)&cmd[2])=freq;
-	write(fd, cmd, cmd[1]);
+	uint8_t cmd[3+4] = {CMD_SET_TX_FREQ, 7, 0};
+	memcpy(&cmd[3], (uint8_t*)&freq, 4);
+	write(fd, cmd, 7);
 
 	//wait for device's response
 	do
 	{
 		ioctl(fd, FIONREAD, &uart_byte_count);
 	}
-	while(uart_byte_count!=3);
-	uint8_t resp[3]={0};
-	read(fd, resp, 3);
+	while(uart_byte_count != 4);
+
+	uint8_t resp[4] = {0};
+	read(fd, resp, 4);
 	
-	if(resp[2]==0)
+	if(resp[3]==0)
 	{
 		dbg_print(0, "TX frequency: ");
 		dbg_print(TERM_GREEN, "%lu Hz\n", config.tx_freq); //OK
 	}
 	else
 	{
-		dbg_print(TERM_YELLOW, "Error %d setting TX frequency: %lu Hz\n", resp[2], config.tx_freq); //error
+		dbg_print(TERM_YELLOW, "Error %d setting TX frequency: %lu Hz\n", resp[3], config.tx_freq); //error
 	}
 }
 
 void dev_set_freq_corr(int16_t corr)
 {
-	uint8_t cmd[4];
-	cmd[0]=CMD_SET_FREQ_CORR;	//freq correction
-	cmd[1]=4;
-	*((int16_t*)&cmd[2])=corr;
-	write(fd, cmd, cmd[1]);
+	uint8_t cmd[3+2] = {CMD_SET_FREQ_CORR, 5, 0};
+	memcpy(&cmd[3], (uint8_t*)&corr, 2);
+	write(fd, cmd, 5);
 
 	//wait for device's response
 	do
 	{
 		ioctl(fd, FIONREAD, &uart_byte_count);
 	}
-	while(uart_byte_count!=3);
-	uint8_t resp[3]={0};
-	read(fd, resp, 3);
+	while(uart_byte_count != 4);
+
+	uint8_t resp[4] = {0};
+	read(fd, resp, 4);
 	
-	if(resp[2]==0)
+	if(resp[3]==0)
 	{
 		dbg_print(0, "Frequency correction: ");
 		dbg_print(TERM_GREEN, "%d\n", config.freq_corr); //OK
 	}
 	else
 	{
-		dbg_print(TERM_YELLOW, "Error %d setting frequency correction: %d\n", resp[2], config.freq_corr); //error
+		dbg_print(TERM_YELLOW, "Error %d setting frequency correction: %d\n", resp[3], config.freq_corr); //error
 	}
 }
 
 void dev_set_afc(uint8_t en)
 {
-	uint8_t cmd[3];
-	cmd[0]=CMD_SET_AFC;
-	cmd[1]=3;
-	cmd[2]=en?1:0;
-
-	write(fd, cmd, cmd[1]);
+	uint8_t cmd[3+1] = {CMD_SET_AFC, 4, 0, en==0?0:1};
+	write(fd, cmd, 4);
 
 	//wait for device's response
 	do
 	{
 		ioctl(fd, FIONREAD, &uart_byte_count);
 	}
-	while(uart_byte_count!=3);
-	uint8_t resp[3]={0};
-	read(fd, resp, 3);
+	while(uart_byte_count != 4);
+	uint8_t resp[4] = {0};
+	read(fd, resp, 4);
 	
-	if(resp[2]==0)
+	if(resp[3]==0)
 	{
 		; //OK
 	}
@@ -708,56 +699,51 @@ void dev_set_afc(uint8_t en)
 
 void dev_set_tx_power(float power) //powr in dBm
 {
-	uint8_t cmd[3];
-	cmd[0]=CMD_SET_TX_POWER;	//transmit power
-	cmd[1]=3;
-	cmd[2]=roundf(power*4.0f);
-	write(fd, cmd, cmd[1]);
+	uint8_t cmd[3+1] = {CMD_SET_TX_POWER, 4, 0, roundf(power*4.0f)};
+	write(fd, cmd, 4);
 
 	//wait for device's response
 	do
 	{
 		ioctl(fd, FIONREAD, &uart_byte_count);
 	}
-	while(uart_byte_count!=3);
-	uint8_t resp[3]={0};
-	read(fd, resp, 3);
+	while(uart_byte_count != 4);
+	uint8_t resp[4] = {0};
+	read(fd, resp, 4);
 	
-	if(resp[2]==0)
+	if(resp[3]==0)
 	{
 		dbg_print(0, "TX power: ");
 		dbg_print(TERM_GREEN, "%2.2f dBm\n", config.tx_pwr); //OK
 	}
 	else
 	{
-		dbg_print(TERM_YELLOW, "Error %d setting TX power: %2.2f dBm\n", resp[2], config.tx_pwr); //error
+		dbg_print(TERM_YELLOW, "Error %d setting TX power: %2.2f dBm\n", resp[3], config.tx_pwr); //error
 	}
 }
 
 void dev_start_tx(void)
 {
-	uint8_t cmd[2];
-	cmd[0]=CMD_SET_TX_START;	//start tranmission
-	cmd[1]=2;
-	write(fd, cmd, cmd[1]);
+	uint8_t cmd[3+1] = {CMD_TX_START, 4, 0, 1};
+	write(fd, cmd, 4);
 }
 
-void dev_start_rx(void)
+void dev_stop_tx(void)
 {
-	uint8_t cmd[3];
-	cmd[0]=CMD_SET_RX;			//start reception
-	cmd[1]=3;
-	cmd[2]=1;
-	write(fd, cmd, cmd[1]);
+	uint8_t cmd[3+1] = {CMD_TX_START, 4, 0, 0};
+	write(fd, cmd, 4);
 }
 
-void dev_stop_rx(void)
+void dev_start_rx(void) //start reception
 {
-	uint8_t cmd[3];
-	cmd[0]=CMD_SET_RX;			//stop reception
-	cmd[1]=3;
-	cmd[2]=0;
-	write(fd, cmd, cmd[1]);
+	uint8_t cmd[3+1] = {CMD_RX_START, 4, 0, 1};
+	write(fd, cmd, 4);
+}
+
+void dev_stop_rx(void) //stop reception
+{
+	uint8_t cmd[3+1] = {CMD_RX_START, 4, 0, 0};
+	write(fd, cmd, 4);
 }
 
 void sigint_handler(int val)
@@ -961,12 +947,13 @@ int main(int argc, char* argv[])
 	{
 		ioctl(fd, FIONREAD, &uart_byte_count);
 	}
-	while(uart_byte_count!=6);
-	uint8_t ping_test[6]={0};
-	read(fd, ping_test, 6);
+	while(uart_byte_count != 7);
 
-	uint32_t dev_err=*((uint32_t*)&ping_test[2]);
-	if(ping_test[0]==0 && ping_test[1]==6 && dev_err==0)
+	uint8_t ping_test[7] = {0};
+	read(fd, ping_test, 7);
+
+	uint32_t dev_err; memcpy((uint8_t*)&dev_err, &ping_test[3], sizeof(uint32_t));
+	if(ping_test[0]==CMD_PING && ping_test[1]==7 && ping_test[2]==0 && dev_err==0)
 		dbg_print(TERM_GREEN, " PONG OK\n");
 	else
 	{
