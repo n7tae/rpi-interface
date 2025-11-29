@@ -126,8 +126,16 @@ enum tx_state_t
 int8_t flt_buff[8*5+1];						//length of this has to match RRC filter's length
 float f_flt_buff[8*5+2*(8*5+4800/25*5)+2];	//8 preamble symbols, 8 for the syncword, and 960 for the payload.
 											//floor(sps/2)=2 extra samples for timing error correction
+
+uint8_t rx_samp_buff[1024];
+int8_t raw_bsb_rx[960];
+uint16_t rx_buff_cnt;
+uint8_t uart_rx_sync;
+uint8_t uart_rx_data_valid;
+
 enum rx_state_t rx_state=RX_IDLE;
 enum tx_state_t tx_state=TX_IDLE;
+
 int8_t lsf_sync_ext[16];					//extended LSF syncword
 lsf_t lsf; 									//recovered LSF
 uint16_t sample_cnt=0;						//sample counter (for RX sync timeout)
@@ -857,7 +865,7 @@ int main(int argc, char* argv[])
 		gpio_err|=gpio_set(config.boot0, 0); //all pins should be at logic low already, but better be safe than sorry
 		gpio_err|=gpio_set(config.pa_en, 0);
 		gpio_err|=gpio_set(config.nrst, 0);
-		usleep(50000U); //50ms
+		usleep(250000U); //250ms
 		gpio_err|=gpio_set(config.nrst, 1);
 
 		if(gpio_err)
@@ -920,7 +928,7 @@ int main(int argc, char* argv[])
 	uint8_t gpio_err=0;
 	gpio_init(argv[0]);
 	gpio_err|=gpio_set(config.nrst, 0); //both pins should be at logic low already, but better be safe than sorry
-	usleep(50000U); //50ms
+	usleep(250000U); //250ms
 	gpio_err|=gpio_set(config.nrst, 1);
 	usleep(1000000U); //1s for device boot-up
 	if(gpio_err==0)
@@ -1042,342 +1050,387 @@ int main(int argc, char* argv[])
 	{
 		//are there any new baseband samples to process?
 		ioctl(fd, FIONREAD, &uart_byte_count);
+
 		if(uart_byte_count>0)
 		{
 			read(fd, (uint8_t*)&rx_bsb_sample, 1);
 
+			//wait for rx baseband data header
+			if (!uart_rx_sync)
+			{
+				rx_samp_buff[0] = rx_samp_buff[1];
+				rx_samp_buff[1] = rx_samp_buff[2];
+				rx_samp_buff[2] = rx_bsb_sample;
+
+				if (rx_samp_buff[0]==CMD_RX_DATA && rx_samp_buff[1]==0xC3 && rx_samp_buff[2]==0x03)
+				{
+					uart_rx_sync = 1;
+					rx_buff_cnt = 3;
+				}
+			}
+			else
+			{
+				rx_samp_buff[rx_buff_cnt] = rx_bsb_sample;
+				rx_buff_cnt++;
+			}
+
+			if (uart_rx_sync && rx_buff_cnt==963)
+			{
+				//dbg_print(TERM_YELLOW, "Baseband packet received\n");
+				memcpy(raw_bsb_rx, &rx_samp_buff[3], sizeof(raw_bsb_rx));
+				memset(rx_samp_buff, 0, sizeof(rx_samp_buff));
+				uart_rx_data_valid = 1;
+				uart_rx_sync = 0;
+				rx_buff_cnt = 0;
+			}
+
+			if (rx_buff_cnt > 1024)
+				dbg_print(TERM_RED, "Input buffer overflow\n");
+		}
+
+		if (uart_rx_data_valid)
+		{
 			//publish over ZMQ
 			if(config.zmq_port!=0)
 			{
-				zmq_samp_buff[zmq_samples++]=rx_bsb_sample;
-				if(zmq_samples==ZMQ_RX_BUFF_SIZE)
+				for (uint16_t i=0; i<960; i++)
 				{
-					zmq_send(bsb_downlink, (char*)zmq_samp_buff, ZMQ_RX_BUFF_SIZE, 0);
-					zmq_samples=0;
+					zmq_samp_buff[zmq_samples++]=raw_bsb_rx[i];
+					if(zmq_samples == ZMQ_RX_BUFF_SIZE)
+					{
+						zmq_send(bsb_downlink, (char*)zmq_samp_buff, ZMQ_RX_BUFF_SIZE, 0);
+						zmq_samples = 0;
+					}
 				}
 			}
 
-			//push buffer
-			for(uint8_t i=0; i<sizeof(flt_buff)-1; i++)
-				flt_buff[i]=flt_buff[i+1];
-			flt_buff[sizeof(flt_buff)-1]=rx_bsb_sample;
-
-			f_sample=0.0f;
-			for(uint8_t i=0; i<sizeof(flt_buff); i++)
-				f_sample+=rrc_taps_5[i]*(float)flt_buff[i];
-			f_sample*=RX_SYMBOL_SCALING_COEFF; //symbol map (works for CC1200 only)
-
-			for(uint16_t i=0; i<sizeof(f_flt_buff)/sizeof(float)-1; i++)
-				f_flt_buff[i]=f_flt_buff[i+1];
-			f_flt_buff[sizeof(f_flt_buff)/sizeof(float)-1]=f_sample;
-
-			//L2 norm check against syncword
-			float symbols[16];
-			for(uint8_t i=0; i<16; i++)
-				symbols[i]=f_flt_buff[i*5];
-
-			float dist_lsf=eucl_norm(&symbols[0], lsf_sync_ext, 16); //check against extended LSF syncword (8 symbols, alternating -3/+3)
-			float dist_pkt=eucl_norm(&symbols[0], pkt_sync_symbols, 8);
-			float dist_str_a=eucl_norm(&symbols[8], str_sync_symbols, 8);
-			for(uint8_t i=0; i<16; i++)
-				symbols[i]=f_flt_buff[960+i*5];
-			float dist_str_b=eucl_norm(&symbols[8], str_sync_symbols, 8);
-			float dist_str=sqrtf(dist_str_a*dist_str_a+dist_str_b*dist_str_b);
-
-			//fwrite(&dist_str, 4, 1, fp);
-
-			//LSF received at idle state
-			if(dist_lsf<=4.5f && rx_state==RX_IDLE)
+			for (uint16_t i=0; i<960; i++)
 			{
-				//find L2's minimum
-				uint8_t sample_offset=0;
-				for(uint8_t i=1; i<=2; i++)
+				//push buffer
+				for(uint8_t i=0; i<sizeof(flt_buff)-1; i++)
+					flt_buff[i] = flt_buff[i+1];
+				flt_buff[sizeof(flt_buff)-1] = raw_bsb_rx[i];
+
+				f_sample=0.0f;
+				for(uint8_t i=0; i<sizeof(flt_buff); i++)
+					f_sample+=rrc_taps_5[i]*(float)flt_buff[i];
+				f_sample*=RX_SYMBOL_SCALING_COEFF; //symbol map (works for CC1200 only)
+
+				for(uint16_t i=0; i<sizeof(f_flt_buff)/sizeof(float)-1; i++)
+					f_flt_buff[i]=f_flt_buff[i+1];
+				f_flt_buff[sizeof(f_flt_buff)/sizeof(float)-1]=f_sample;
+
+				//L2 norm check against syncword
+				float symbols[16];
+				for(uint8_t i=0; i<16; i++)
+					symbols[i]=f_flt_buff[i*5];
+
+				float dist_lsf=eucl_norm(&symbols[0], lsf_sync_ext, 16); //check against extended LSF syncword (8 symbols, alternating -3/+3)
+				float dist_pkt=eucl_norm(&symbols[0], pkt_sync_symbols, 8);
+				float dist_str_a=eucl_norm(&symbols[8], str_sync_symbols, 8);
+				for(uint8_t i=0; i<16; i++)
+					symbols[i]=f_flt_buff[960+i*5];
+				float dist_str_b=eucl_norm(&symbols[8], str_sync_symbols, 8);
+				float dist_str=sqrtf(dist_str_a*dist_str_a+dist_str_b*dist_str_b);
+
+				//fwrite(&dist_str, 4, 1, fp);
+
+				//LSF received at idle state
+				if(dist_lsf<=4.5f && rx_state==RX_IDLE)
 				{
-					for(uint8_t j=0; j<16; j++)
-						symbols[j]=f_flt_buff[j*5+i];
-
-					float d=eucl_norm(symbols, lsf_sync_ext, 16);
-
-					if(d<dist_lsf)
+					//find L2's minimum
+					uint8_t sample_offset=0;
+					for(uint8_t i=1; i<=2; i++)
 					{
-						dist_lsf=d;
-						sample_offset=i;
-					}
-				}
+						for(uint8_t j=0; j<16; j++)
+							symbols[j]=f_flt_buff[j*5+i];
 
-				float pld[SYM_PER_PLD];
+						float d=eucl_norm(symbols, lsf_sync_ext, 16);
 
-				for(uint16_t i=0; i<SYM_PER_PLD; i++)
-				{
-					pld[i]=f_flt_buff[16*5+i*5+sample_offset]; //add symbol timing correction
-				}
-
-				uint32_t e = decode_LSF(&lsf, pld);
-
-				uint8_t call_dst[10], call_src[10], can;
-				uint16_t type, crc;
-				decode_callsign_bytes(call_dst, lsf.dst);
-                decode_callsign_bytes(call_src, lsf.src);
-				type=((uint16_t)lsf.type[0]<<8|lsf.type[1]);
-				can=(type>>7)&0xFU;
-				crc=(((uint16_t)lsf.crc[0]<<8)|lsf.crc[1]);
-
-				time(&rawtime);
-    			timeinfo=localtime(&rawtime);
-				dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
-					timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-				dbg_print(TERM_YELLOW, " RF LSF:");
-
-				if(LSF_CRC(&lsf)==crc) //if CRC valid
-				{
-					got_lsf=1;
-					rx_state=RX_SYNCD;	//change RX state
-					sample_cnt=0;		//reset rx timeout timer
-
-					last_fn=0xFFFFU;
-
-					dbg_print(TERM_GREEN, " CRC OK ");
-					dbg_print(TERM_YELLOW, "| DST: %-9s | SRC: %-9s | TYPE: %04X (CAN=%d) | MER: %-3.1f%%\n",
-						call_dst, call_src, type, can, (float)e/0xFFFFU/SYM_PER_PLD/2.0f*100.0f);
-
-					if(type&1) //if stream
-					{
-						m17stream.fn=0;
-						m17stream.sid=rand()%0x10000U;
-
-						uint8_t refl_pld[(32+16+224+16+128+16)/8];					//single frame
-						sprintf((char*)&refl_pld[0], "M17 ");						//MAGIC
-						*((uint16_t*)&refl_pld[4])=m17stream.sid;					//SID
-						memcpy(&refl_pld[6], &lsf, 224/8);							//LSD
-						*((uint16_t*)&refl_pld[34])=m17stream.fn;					//FN
-						memset(&refl_pld[36], 0, 128/8);							//payload (zeros, because this is LSF)
-						uint16_t crc_val=CRC_M17(refl_pld, 52);						//CRC
-						*((uint16_t*)&refl_pld[52])=(crc_val>>8)|(crc_val<<8);		//endianness swap
-						refl_send(refl_pld, sizeof(refl_pld));						//send a single frame to the reflector
-
-						if(logfile!=NULL)
+						if(d<dist_lsf)
 						{
-							time(&rawtime);
-							timeinfo=localtime(&rawtime);
-							fprintf(logfile, "\"%02d:%02d:%02d\" \"%s\" \"%s\" \"RF\" \"%d\" \"%3.1f%%\"\n",
-								timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec,
-								call_src, call_dst, can, (float)e/0xFFFFU/SYM_PER_PLD/2.0f*100.0f);
+							dist_lsf=d;
+							sample_offset=i;
 						}
 					}
-				}
-				else
-				{
-					dbg_print(TERM_RED, " CRC ERR\n");
-				}
-			}
 
-			//stream frame received
-			else if(dist_str<=5.0f)
-			{
-				rx_state=RX_SYNCD;
-				sample_cnt=0;		//reset rx timeout timer
+					float pld[SYM_PER_PLD];
 
-				//find L2's minimum
-				uint8_t sample_offset=0;
-				for(uint8_t i=1; i<=2; i++)
-				{
-					for(uint8_t j=0; j<16; j++)
-						symbols[j]=f_flt_buff[j*5+i];
-					
-					float tmp_a=eucl_norm(&symbols[8], str_sync_symbols, 8);
-					for(uint8_t j=0; j<16; j++)
-						symbols[j]=f_flt_buff[960+j*5+i];
-					
-					float tmp_b=eucl_norm(&symbols[8], str_sync_symbols, 8);
-
-					float d=sqrtf(tmp_a*tmp_a+tmp_b*tmp_b);
-
-					if(d<dist_str)
+					for(uint16_t i=0; i<SYM_PER_PLD; i++)
 					{
-						dist_str=d;
-						sample_offset=i;
+						pld[i]=f_flt_buff[16*5+i*5+sample_offset]; //add symbol timing correction
 					}
-				}
 
-				float pld[SYM_PER_PLD];
-				
-				for(uint16_t i=0; i<SYM_PER_PLD; i++)
-				{
-					pld[i]=f_flt_buff[16*5+i*5+sample_offset];
-				}
+					uint32_t e = decode_LSF(&lsf, pld);
 
-				uint8_t lich[6];
-				uint8_t lich_cnt;
-				uint8_t frame_data[128/8];
-				uint32_t e = decode_str_frame(frame_data, lich, &fn, &lich_cnt, pld);
-				
-				//set the last FN number to FN-1 if this is a late-join and the frame data is valid
-				if(first_frame==1 && (fn%6)==lich_cnt)
-				{
-					last_fn=fn-1;
-				}
-				
-				if(((last_fn+1)&0xFFFFU)==fn) //new frame. TODO: maybe a timeout would be better
-				{
-					if(lich_parts!=0x3FU) //6 chunks = 0b111111
+					uint8_t call_dst[10], call_src[10], can;
+					uint16_t type, crc;
+					decode_callsign_bytes(call_dst, lsf.dst);
+					decode_callsign_bytes(call_src, lsf.src);
+					type=((uint16_t)lsf.type[0]<<8|lsf.type[1]);
+					can=(type>>7)&0xFU;
+					crc=(((uint16_t)lsf.crc[0]<<8)|lsf.crc[1]);
+
+					time(&rawtime);
+					timeinfo=localtime(&rawtime);
+					dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
+						timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+					dbg_print(TERM_YELLOW, " RF LSF:");
+
+					if(LSF_CRC(&lsf)==crc) //if CRC valid
 					{
-						//reconstruct LSF chunk by chunk
-						memcpy(&lsf_b[lich_cnt*5], lich, 40/8); //40 bits
-						lich_parts|=(1<<lich_cnt);
-						if(lich_parts==0x3FU && got_lsf==0) //collected all of them?
+						got_lsf=1;
+						rx_state=RX_SYNCD;	//change RX state
+						sample_cnt=0;		//reset rx timeout timer
+
+						last_fn=0xFFFFU;
+
+						dbg_print(TERM_GREEN, " CRC OK ");
+						dbg_print(TERM_YELLOW, "| DST: %-9s | SRC: %-9s | TYPE: %04X (CAN=%d) | MER: %-3.1f%%\n",
+							call_dst, call_src, type, can, (float)e/0xFFFFU/SYM_PER_PLD/2.0f*100.0f);
+
+						if(type&1) //if stream
 						{
-							if(!CRC_M17(lsf_b, 30)) //CRC check
+							m17stream.fn=0;
+							m17stream.sid=rand()%0x10000U;
+
+							uint8_t refl_pld[(32+16+224+16+128+16)/8];					//single frame
+							sprintf((char*)&refl_pld[0], "M17 ");						//MAGIC
+							*((uint16_t*)&refl_pld[4])=m17stream.sid;					//SID
+							memcpy(&refl_pld[6], &lsf, 224/8);							//LSD
+							*((uint16_t*)&refl_pld[34])=m17stream.fn;					//FN
+							memset(&refl_pld[36], 0, 128/8);							//payload (zeros, because this is LSF)
+							uint16_t crc_val=CRC_M17(refl_pld, 52);						//CRC
+							*((uint16_t*)&refl_pld[52])=(crc_val>>8)|(crc_val<<8);		//endianness swap
+							refl_send(refl_pld, sizeof(refl_pld));						//send a single frame to the reflector
+
+							if(logfile!=NULL)
 							{
-								got_lsf=1;
-								m17stream.sid=rand()%0x10000U;
-
-								uint8_t call_dst[12]={0}, call_src[12]={0};
-								uint16_t type=((uint16_t)lsf_b[12]<<8)|lsf_b[13];
-								uint8_t can=(type>>7)&0xF;
-
-								decode_callsign_bytes(call_dst, &lsf_b[0]);
-								decode_callsign_bytes(call_src, &lsf_b[6]);
-
 								time(&rawtime);
 								timeinfo=localtime(&rawtime);
-								dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d] ",
-									timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-								dbg_print(TERM_YELLOW, "LSF REC: DST: %-9s | SRC: %-9s | TYPE: %04X (CAN=%d)\n",
-									call_dst, call_src, type, can);
-
-								if(logfile!=NULL)
-								{
-									time(&rawtime);
-									timeinfo=localtime(&rawtime);
-									fprintf(logfile, "\"%02d:%02d:%02d\" \"%s\" \"%s\" \"RF\" \"%d\" \"--\"\n",
-										timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec,
-										call_src, call_dst, can);
-								}
-							}
-							else
-							{
-								dbg_print(TERM_YELLOW, "LSF CRC ERR\n");
-								lich_parts=0; //reset flags
+								fprintf(logfile, "\"%02d:%02d:%02d\" \"%s\" \"%s\" \"RF\" \"%d\" \"%3.1f%%\"\n",
+									timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec,
+									call_src, call_dst, can, (float)e/0xFFFFU/SYM_PER_PLD/2.0f*100.0f);
 							}
 						}
 					}
-
-					time(&rawtime);
-    				timeinfo=localtime(&rawtime);
-
-					dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
-						timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-					dbg_print(TERM_YELLOW, " RF FRM: ");
-					dbg_print(TERM_YELLOW, " FN:%04X | LICH_CNT:%d", fn, lich_cnt);
-					/*dbg_print(TERM_YELLOW, " | PLD: ");
-					for(uint8_t i=0; i<128/8; i++)
-						dbg_print(TERM_YELLOW, "%02X", frame_data[2+i]);*/
-					dbg_print(TERM_YELLOW, " | MER: %-3.1f%%\n",
-						(float)e/0xFFFFU/SYM_PER_PLD/2.0f*100.0f);
-
-					if(got_lsf)
+					else
 					{
-						m17stream.fn=(fn>>8)|((fn&0xFF)<<8);
-						uint8_t refl_pld[(32+16+224+16+128+16)/8];					//single frame
-						sprintf((char*)&refl_pld[0], "M17 ");						//MAGIC
-						*((uint16_t*)&refl_pld[4])=m17stream.sid;					//SID
-						memcpy(&refl_pld[6], &lsf_b[0], 224/8);						//LSD
-						*((uint16_t*)&refl_pld[34])=m17stream.fn;					//FN
-						memcpy(&refl_pld[36], frame_data, 128/8);					//payload
-						uint16_t crc_val=CRC_M17(refl_pld, 52);						//CRC
-						*((uint16_t*)&refl_pld[52])=(crc_val>>8)|(crc_val<<8);		//endianness swap
-						refl_send(refl_pld, sizeof(refl_pld));						//send a single frame to the reflector
-					}
-
-					last_fn=fn;
-				}
-
-				first_frame=0;
-			}
-
-			//TODO: handle packet mode reception over RF
-			else if(dist_pkt<=5.0f && rx_state==RX_SYNCD)
-			{
-				//find L2's minimum
-				uint8_t sample_offset=0;
-				for(uint8_t i=1; i<=2; i++)
-				{
-					for(uint8_t j=0; j<8; j++)
-						symbols[j]=f_flt_buff[j*5+i];
-						
-					float d=eucl_norm(symbols, pkt_sync_symbols, 8);
-					
-					if(d<dist_pkt)
-					{
-						dist_pkt=d;
-						sample_offset=i;
+						dbg_print(TERM_RED, " CRC ERR\n");
 					}
 				}
 
-				float pld[SYM_PER_PLD];
-				uint8_t pkt_frame_data[25] = {0};
-				uint8_t eof = 0;
-				
-				for(uint16_t i=0; i<SYM_PER_PLD; i++)
+				//stream frame received
+				else if(dist_str<=5.0f)
 				{
-					pld[i]=f_flt_buff[8*5+i*5+sample_offset];
-				}
-
-				//debug data dump
-				//fwrite((uint8_t*)&f_flt_buff[sample_offset], SYM_PER_FRA*5*sizeof(float), 1, fp);
-
-				/*uint32_t e = */decode_pkt_frame(pkt_frame_data, &eof, &pkt_fn, pld);
-
-				//TODO: this will only properly decode single-framed packets
-				if(last_pkt_fn==0xFF && eof==1 && CRC_M17(pkt_frame_data, strlen((char*)pkt_frame_data)+3)==0)
-				{
+					rx_state=RX_SYNCD;
 					sample_cnt=0;		//reset rx timeout timer
-					last_pkt_fn=pkt_fn;
 
-					time(&rawtime);
-					timeinfo=localtime(&rawtime);
+					//find L2's minimum
+					uint8_t sample_offset=0;
+					for(uint8_t i=1; i<=2; i++)
+					{
+						for(uint8_t j=0; j<16; j++)
+							symbols[j]=f_flt_buff[j*5+i];
+						
+						float tmp_a=eucl_norm(&symbols[8], str_sync_symbols, 8);
+						for(uint8_t j=0; j<16; j++)
+							symbols[j]=f_flt_buff[960+j*5+i];
+						
+						float tmp_b=eucl_norm(&symbols[8], str_sync_symbols, 8);
 
-					dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
-						timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-					dbg_print(TERM_YELLOW, " RF PKT: ");
-					/*for(uint8_t i=0; i<25; i++)
-						dbg_print(0, "%02X ", pkt_frame_data[i]);
-					dbg_print(0, "\n");*/
-					dbg_print(0, "%s\n", (char*)&pkt_frame_data[1]);
-					uint8_t refl_pld[4+sizeof(lsf)+strlen((char*)pkt_frame_data)+3];					//single frame
-					sprintf((char*)&refl_pld[0], "M17P");						//MAGIC
-					memcpy(&refl_pld[4], &lsf, sizeof(lsf));					//LSF
-					memcpy(&refl_pld[34], &pkt_frame_data, strlen((char*)pkt_frame_data)+3); //PKT data + CRC
-					/*debug logging
-					time(&rawtime);
-					timeinfo=localtime(&rawtime);
+						float d=sqrtf(tmp_a*tmp_a+tmp_b*tmp_b);
 
-					dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
-						timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-					dbg_print(TERM_YELLOW, " refl_pld: ");
-					for(uint8_t i=0; i<sizeof(refl_pld); i++)
-						dbg_print(0, "%02X ", refl_pld[i]);
-					dbg_print(0, "\n");
-					*/
-					refl_send(refl_pld, 4+sizeof(lsf)+strlen((char*)pkt_frame_data)+3);						//send to the reflector
+						if(d<dist_str)
+						{
+							dist_str=d;
+							sample_offset=i;
+						}
+					}
+
+					float pld[SYM_PER_PLD];
+					
+					for(uint16_t i=0; i<SYM_PER_PLD; i++)
+					{
+						pld[i]=f_flt_buff[16*5+i*5+sample_offset];
+					}
+
+					uint8_t lich[6];
+					uint8_t lich_cnt;
+					uint8_t frame_data[128/8];
+					uint32_t e = decode_str_frame(frame_data, lich, &fn, &lich_cnt, pld);
+					
+					//set the last FN number to FN-1 if this is a late-join and the frame data is valid
+					if(first_frame==1 && (fn%6)==lich_cnt)
+					{
+						last_fn=fn-1;
+					}
+					
+					if(((last_fn+1)&0xFFFFU)==fn) //new frame. TODO: maybe a timeout would be better
+					{
+						if(lich_parts!=0x3FU) //6 chunks = 0b111111
+						{
+							//reconstruct LSF chunk by chunk
+							memcpy(&lsf_b[lich_cnt*5], lich, 40/8); //40 bits
+							lich_parts|=(1<<lich_cnt);
+							if(lich_parts==0x3FU && got_lsf==0) //collected all of them?
+							{
+								if(!CRC_M17(lsf_b, 30)) //CRC check
+								{
+									got_lsf=1;
+									m17stream.sid=rand()%0x10000U;
+
+									uint8_t call_dst[12]={0}, call_src[12]={0};
+									uint16_t type=((uint16_t)lsf_b[12]<<8)|lsf_b[13];
+									uint8_t can=(type>>7)&0xF;
+
+									decode_callsign_bytes(call_dst, &lsf_b[0]);
+									decode_callsign_bytes(call_src, &lsf_b[6]);
+
+									time(&rawtime);
+									timeinfo=localtime(&rawtime);
+									dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d] ",
+										timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+									dbg_print(TERM_YELLOW, "LSF REC: DST: %-9s | SRC: %-9s | TYPE: %04X (CAN=%d)\n",
+										call_dst, call_src, type, can);
+
+									if(logfile!=NULL)
+									{
+										time(&rawtime);
+										timeinfo=localtime(&rawtime);
+										fprintf(logfile, "\"%02d:%02d:%02d\" \"%s\" \"%s\" \"RF\" \"%d\" \"--\"\n",
+											timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec,
+											call_src, call_dst, can);
+									}
+								}
+								else
+								{
+									dbg_print(TERM_YELLOW, "LSF CRC ERR\n");
+									lich_parts=0; //reset flags
+								}
+							}
+						}
+
+						time(&rawtime);
+						timeinfo=localtime(&rawtime);
+
+						dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
+							timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+						dbg_print(TERM_YELLOW, " RF FRM: ");
+						dbg_print(TERM_YELLOW, " FN:%04X | LICH_CNT:%d", fn, lich_cnt);
+						/*dbg_print(TERM_YELLOW, " | PLD: ");
+						for(uint8_t i=0; i<128/8; i++)
+							dbg_print(TERM_YELLOW, "%02X", frame_data[2+i]);*/
+						dbg_print(TERM_YELLOW, " | MER: %-3.1f%%\n",
+							(float)e/0xFFFFU/SYM_PER_PLD/2.0f*100.0f);
+
+						if(got_lsf)
+						{
+							m17stream.fn=(fn>>8)|((fn&0xFF)<<8);
+							uint8_t refl_pld[(32+16+224+16+128+16)/8];					//single frame
+							sprintf((char*)&refl_pld[0], "M17 ");						//MAGIC
+							*((uint16_t*)&refl_pld[4])=m17stream.sid;					//SID
+							memcpy(&refl_pld[6], &lsf_b[0], 224/8);						//LSD
+							*((uint16_t*)&refl_pld[34])=m17stream.fn;					//FN
+							memcpy(&refl_pld[36], frame_data, 128/8);					//payload
+							uint16_t crc_val=CRC_M17(refl_pld, 52);						//CRC
+							*((uint16_t*)&refl_pld[52])=(crc_val>>8)|(crc_val<<8);		//endianness swap
+							refl_send(refl_pld, sizeof(refl_pld));						//send a single frame to the reflector
+						}
+
+						last_fn=fn;
+					}
+
+					first_frame=0;
 				}
-			}
-			
-			//RX sync timeout
-			if(rx_state==RX_SYNCD)
-			{
-				sample_cnt++;
-				if(sample_cnt==960*2)
+
+				//TODO: handle packet mode reception over RF
+				else if(dist_pkt<=5.0f && rx_state==RX_SYNCD)
 				{
-					rx_state=RX_IDLE;
-					sample_cnt=0;
-					first_frame=1;
-					last_fn=0xFFFFU; //TODO: there's a small chance that this will cause problems (it's a valid frame number)
-					last_pkt_fn=0xFF;
-					lich_parts=0;
-					got_lsf=0;
+					//find L2's minimum
+					uint8_t sample_offset=0;
+					for(uint8_t i=1; i<=2; i++)
+					{
+						for(uint8_t j=0; j<8; j++)
+							symbols[j]=f_flt_buff[j*5+i];
+							
+						float d=eucl_norm(symbols, pkt_sync_symbols, 8);
+						
+						if(d<dist_pkt)
+						{
+							dist_pkt=d;
+							sample_offset=i;
+						}
+					}
+
+					float pld[SYM_PER_PLD];
+					uint8_t pkt_frame_data[25] = {0};
+					uint8_t eof = 0;
+					
+					for(uint16_t i=0; i<SYM_PER_PLD; i++)
+					{
+						pld[i]=f_flt_buff[8*5+i*5+sample_offset];
+					}
+
+					//debug data dump
+					//fwrite((uint8_t*)&f_flt_buff[sample_offset], SYM_PER_FRA*5*sizeof(float), 1, fp);
+
+					/*uint32_t e = */decode_pkt_frame(pkt_frame_data, &eof, &pkt_fn, pld);
+
+					//TODO: this will only properly decode single-framed packets
+					if(last_pkt_fn==0xFF && eof==1 && CRC_M17(pkt_frame_data, strlen((char*)pkt_frame_data)+3)==0)
+					{
+						sample_cnt=0;		//reset rx timeout timer
+						last_pkt_fn=pkt_fn;
+
+						time(&rawtime);
+						timeinfo=localtime(&rawtime);
+
+						dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
+							timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+						dbg_print(TERM_YELLOW, " RF PKT: ");
+						/*for(uint8_t i=0; i<25; i++)
+							dbg_print(0, "%02X ", pkt_frame_data[i]);
+						dbg_print(0, "\n");*/
+						dbg_print(0, "%s\n", (char*)&pkt_frame_data[1]);
+						uint8_t refl_pld[4+sizeof(lsf)+strlen((char*)pkt_frame_data)+3];					//single frame
+						sprintf((char*)&refl_pld[0], "M17P");						//MAGIC
+						memcpy(&refl_pld[4], &lsf, sizeof(lsf));					//LSF
+						memcpy(&refl_pld[34], &pkt_frame_data, strlen((char*)pkt_frame_data)+3); //PKT data + CRC
+						/*debug logging
+						time(&rawtime);
+						timeinfo=localtime(&rawtime);
+
+						dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
+							timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+						dbg_print(TERM_YELLOW, " refl_pld: ");
+						for(uint8_t i=0; i<sizeof(refl_pld); i++)
+							dbg_print(0, "%02X ", refl_pld[i]);
+						dbg_print(0, "\n");
+						*/
+						refl_send(refl_pld, 4+sizeof(lsf)+strlen((char*)pkt_frame_data)+3);						//send to the reflector
+					}
+				}
+				
+				//RX sync timeout
+				if(rx_state==RX_SYNCD)
+				{
+					sample_cnt++;
+					if(sample_cnt==960*2)
+					{
+						rx_state=RX_IDLE;
+						sample_cnt=0;
+						first_frame=1;
+						last_fn=0xFFFFU; //TODO: there's a small chance that this will cause problems (it's a valid frame number)
+						last_pkt_fn=0xFF;
+						lich_parts=0;
+						got_lsf=0;
+					}
 				}
 			}
+
+			//all data has been used
+			uart_rx_data_valid = 0;
 		}
 
 		//receive a packet - non-blocking
