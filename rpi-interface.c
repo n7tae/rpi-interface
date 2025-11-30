@@ -1447,8 +1447,9 @@ int main(int argc, char* argv[])
 				static uint8_t src_call[10]={0};
 				memcpy(m17stream.pld, &rx_buff[(32+16+224+16)/8U], 128/8);
 
-				int8_t frame_symbols[SYM_PER_FRA];	//raw frame symbols
-				int8_t bsb_samples[SYM_PER_FRA*5];	//filtered baseband samples = symbols*sps
+				int8_t frame_symbols[SYM_PER_FRA];						//raw frame symbols
+				int8_t bsb_samples[SYM_PER_FRA*5];						//filtered baseband samples = symbols*sps
+				uint8_t bsb_chunk[963] = {CMD_TX_DATA, 0xC3, 0x03};		//baseband samples wrapped in a frame
 
 				if(tx_state==TX_IDLE) //first received frame
 				{
@@ -1526,21 +1527,24 @@ int main(int argc, char* argv[])
 
 					//filter and send out to the device
 					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-					write(fd, (uint8_t*)bsb_samples, sizeof(bsb_samples));
+					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+					write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
 
 					//now the LSF
 					gen_frame_i8(frame_symbols, NULL, FRAME_LSF, &(m17stream.lsf), 0, 0);
 
 					//filter and send out to the device
 					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-					write(fd, (uint8_t*)bsb_samples, sizeof(bsb_samples));
+					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+					write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
 
 					//finally, the first frame
 					gen_frame_i8(frame_symbols, m17stream.pld, FRAME_STR, &(m17stream.lsf), (m17stream.fn&0x7FFFU)%6, m17stream.fn);
 
 					//filter and send out to the device
 					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-					write(fd, (uint8_t*)bsb_samples, sizeof(bsb_samples));
+					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+					write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
 				}
 				else
 				{
@@ -1549,7 +1553,8 @@ int main(int argc, char* argv[])
 
 					//filter and send out to the device
 					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-					write(fd, (uint8_t*)bsb_samples, sizeof(bsb_samples));
+					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+					write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
 				}
 
 				time(&rawtime);
@@ -1571,7 +1576,8 @@ int main(int argc, char* argv[])
 
 					//filter and send out to the device
 					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-					write(fd, (uint8_t*)bsb_samples, sizeof(bsb_samples));
+					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+					write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
 
 					time(&rawtime);
 					timeinfo=localtime(&rawtime);
@@ -1624,8 +1630,9 @@ int main(int argc, char* argv[])
 				}
 
 				//TODO: handle TX here
-				int8_t frame_symbols[SYM_PER_FRA];	//raw frame symbols
-				int8_t bsb_samples[SYM_PER_FRA*5];	//filtered baseband samples = symbols*sps
+				int8_t frame_symbols[SYM_PER_FRA];						//raw frame symbols
+				int8_t bsb_samples[SYM_PER_FRA*5];						//filtered baseband samples = symbols*sps
+				uint8_t bsb_chunk[963] = {CMD_TX_DATA, 0xC3, 0x03};		//baseband samples wrapped in a frame
 
 				//log to file
 				FILE* logfile=fopen((char*)config.log_path, "awb");
@@ -1662,14 +1669,16 @@ int main(int argc, char* argv[])
 				
 				//filter and send out to the device
 				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-				write(fd, (uint8_t*)bsb_samples, sizeof(bsb_samples));
+				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+				write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
 				
 				//now the LSF
 				gen_frame_i8(frame_symbols, NULL, FRAME_LSF, (lsf_t*)&rx_buff[4], 0, 0);
 				
 				//filter and send out to the device
 				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-				write(fd, (uint8_t*)bsb_samples, sizeof(bsb_samples));
+				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+				write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
 				
 				//packet frames
 				uint16_t pld_len=rx_len-(4+240/8); //"M17P" plus 240-bit LSD
@@ -1682,7 +1691,8 @@ int main(int argc, char* argv[])
 					pld[25]=frame<<2;
 					gen_frame_i8(frame_symbols, pld, FRAME_PKT, NULL, 0, 0);
 					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-					write(fd, (uint8_t*)bsb_samples, sizeof(bsb_samples));
+					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+					write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
 					pld_len-=25;
 					frame++;
 					usleep(40*1000U);
@@ -1692,7 +1702,8 @@ int main(int argc, char* argv[])
 				pld[25]=(1<<7)|(pld_len<<2); //EoT flag set, amount of remaining data in the 'frame number' field
 				gen_frame_i8(frame_symbols, pld, FRAME_PKT, NULL, 0, 0);
 				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-				write(fd, (uint8_t*)bsb_samples, sizeof(bsb_samples));
+				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+				write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
 				usleep(40*1000U);
 
 				//now the final EOT marker
@@ -1701,7 +1712,8 @@ int main(int argc, char* argv[])
 
 				//filter and send out to the device
 				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-				write(fd, (uint8_t*)bsb_samples, sizeof(bsb_samples));
+				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+				write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
 
 				time(&rawtime);
 				timeinfo=localtime(&rawtime);
