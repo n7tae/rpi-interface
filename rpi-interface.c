@@ -1,9 +1,9 @@
 /*
  * rpi-interface.c
  *
- *  Edited on: Jul 16, 2025
- *     Author: Wojciech Kaczmarski, SP5WWP
- *             M17 Foundation
+ * Edited on: Nov 30, 2025
+ * Author: Wojciech Kaczmarski, SP5WWP
+ *         M17 Foundation
  */
 
 #include <stdio.h>
@@ -66,7 +66,6 @@ uint32_t saddr_size=sizeof(saddr);
 uint8_t tx_buff[512]={0};
 uint8_t rx_buff[65536]={0};
 int tx_len=0, rx_len=0;
-int socket_byte_count=0; //data available for reading at the socket
 
 //config stuff
 struct config_t
@@ -146,8 +145,6 @@ uint8_t first_frame=1;						//first decoded frame after SYNC?
 uint8_t lich_parts=0;						//LICH chunks received (bit flags)
 uint8_t got_lsf=0;							//got LSF? either from LSF or reconstructed from LICH
 
-uint8_t uart_byte_count;					//how many bytes are available on UART
-
 //timer for timeouts
 uint32_t tx_timer=0;
 
@@ -194,15 +191,15 @@ uint32_t get_ms(void)
 {
 	struct timespec spec;
 
-    clock_gettime(CLOCK_REALTIME, &spec);
+	clock_gettime(CLOCK_REALTIME, &spec);
 
 	time_t s = spec.tv_sec;
-    uint32_t ms = roundf(spec.tv_nsec/1.0e6); //convert nanoseconds to milliseconds
-    if(ms>999)
+	uint32_t ms = roundf(spec.tv_nsec/1.0e6); //convert nanoseconds to milliseconds
+	if(ms>999)
 	{
-        s++;
-        ms=0;
-    }
+		s++;
+		ms=0;
+	}
 
 	return s*1000 + ms;
 }
@@ -212,7 +209,7 @@ int fd; //UART handle
 
 int get_baud(uint32_t baud)
 {
-    switch(baud)
+	switch(baud)
 	{
 		case 9600:
 			return B9600;
@@ -252,7 +249,7 @@ int get_baud(uint32_t baud)
 			return B4000000;
 		default: 
 			return -1;
-    }
+	}
 }
 
 int set_interface_attribs(int fd, uint32_t speed, int parity)
@@ -267,21 +264,21 @@ int set_interface_attribs(int fd, uint32_t speed, int parity)
 	cfsetospeed(&tty, get_baud(speed));
 	cfsetispeed(&tty, get_baud(speed));
 
-	tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;     // 8-bit chars
-	// disable IGNBRK for mismatched speed tests; otherwise receive break
-	// as \000 chars
-	tty.c_iflag &= ~IGNBRK;			// disable break processing
-	tty.c_lflag = 0;				// no signaling chars, no echo,
-									// no canonical processing
-	tty.c_oflag = 0;                // no remapping, no delays
-	tty.c_cc[VMIN]  = 0;            // read doesn't block
-	tty.c_cc[VTIME] = 0;            // 0.0 seconds read timeout
+	tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;	//8-bit chars
+	//disable IGNBRK for mismatched speed tests; otherwise receive break
+	//as \000 chars
+	tty.c_iflag &= ~IGNBRK;			//disable break processing
+	tty.c_lflag = 0;				//no signaling chars, no echo,
+									//no canonical processing
+	tty.c_oflag = 0;				//no remapping, no delays
+	tty.c_cc[VMIN]  = 1;			//read returns when 1 byte available
+	tty.c_cc[VTIME] = 5;			//5*0.5=0.5 seconds read timeout
 
 	tty.c_iflag &= ~(IXON | IXOFF | IXANY); // shut off xon/xoff ctrl
 
-	tty.c_cflag |= (CLOCAL | CREAD);// ignore modem controls,
-                                        // enable reading
-	tty.c_cflag &= ~(PARENB | PARODD);      // shut off parity
+	tty.c_cflag |= (CLOCAL | CREAD);	//ignore modem controls,
+										//enable reading
+	tty.c_cflag &= ~(PARENB | PARODD);	//shut off parity
 	tty.c_cflag |= parity;
 	tty.c_cflag &= ~CSTOPB;
 	tty.c_cflag &= ~CRTSCTS;
@@ -293,26 +290,6 @@ int set_interface_attribs(int fd, uint32_t speed, int parity)
 	}
 	
 	return 0;
-}
-
-void set_blocking(int fd, int should_block)
-{
-	struct termios tty;
-	memset(&tty, 0, sizeof tty);
-	if(tcgetattr(fd, &tty)!=0)
-	{
-		dbg_print(TERM_YELLOW, " Error from tggetattr\n");
-		exit(1);
-	}
-
-	tty.c_cc[VMIN]  = should_block ? 1 : 0;
-	tty.c_cc[VTIME] = 5;            // 0.5 seconds read timeout
-
-	if(tcsetattr(fd, TCSANOW, &tty)!=0)
-	{
-		dbg_print(TERM_YELLOW, " Error setting UART attributes\n");
-		exit(1);
-	}
 }
 
 /**
@@ -607,14 +584,14 @@ void dev_set_rx_freq(uint32_t freq)
 	write(fd, cmd, 7);
 	
 	//wait for device's response
-	do
-	{
-		ioctl(fd, FIONREAD, &uart_byte_count);
-	}
-	while(uart_byte_count != 4);
-
 	uint8_t resp[4] = {0};
-	read(fd, resp, 4);
+	int rd = read(fd, resp, 4);
+
+	if (rd < 4)
+	{
+		dbg_print(TERM_RED, "%s(): Timeout waiting for device response\n", __func__);
+		return;
+	}
 	
 	if(resp[3]==0)
 	{
@@ -634,14 +611,14 @@ void dev_set_tx_freq(uint32_t freq)
 	write(fd, cmd, 7);
 
 	//wait for device's response
-	do
-	{
-		ioctl(fd, FIONREAD, &uart_byte_count);
-	}
-	while(uart_byte_count != 4);
-
 	uint8_t resp[4] = {0};
-	read(fd, resp, 4);
+	int rd = read(fd, resp, 4);
+
+	if (rd < 4)
+	{
+		dbg_print(TERM_RED, "%s(): Timeout waiting for device response\n", __func__);
+		return;
+	}
 	
 	if(resp[3]==0)
 	{
@@ -661,14 +638,14 @@ void dev_set_freq_corr(int16_t corr)
 	write(fd, cmd, 5);
 
 	//wait for device's response
-	do
-	{
-		ioctl(fd, FIONREAD, &uart_byte_count);
-	}
-	while(uart_byte_count != 4);
-
 	uint8_t resp[4] = {0};
-	read(fd, resp, 4);
+	int rd = read(fd, resp, 4);
+
+	if (rd < 4)
+	{
+		dbg_print(TERM_RED, "%s(): Timeout waiting for device response\n", __func__);
+		return;
+	}
 	
 	if(resp[3]==0)
 	{
@@ -687,13 +664,14 @@ void dev_set_afc(uint8_t en)
 	write(fd, cmd, 4);
 
 	//wait for device's response
-	do
-	{
-		ioctl(fd, FIONREAD, &uart_byte_count);
-	}
-	while(uart_byte_count != 4);
 	uint8_t resp[4] = {0};
-	read(fd, resp, 4);
+	int rd = read(fd, resp, 4);
+
+	if (rd < 4)
+	{
+		dbg_print(TERM_RED, "%s(): Timeout waiting for device response\n", __func__);
+		return;
+	}
 	
 	if(resp[3]==0)
 	{
@@ -711,13 +689,14 @@ void dev_set_tx_power(float power) //powr in dBm
 	write(fd, cmd, 4);
 
 	//wait for device's response
-	do
-	{
-		ioctl(fd, FIONREAD, &uart_byte_count);
-	}
-	while(uart_byte_count != 4);
 	uint8_t resp[4] = {0};
-	read(fd, resp, 4);
+	int rd = read(fd, resp, 4);
+
+	if (rd < 4)
+	{
+		dbg_print(TERM_RED, "%s(): Timeout waiting for device response\n", __func__);
+		return;
+	}
 	
 	if(resp[3]==0)
 	{
@@ -756,14 +735,14 @@ void dev_stop_rx(void) //stop reception
 
 void sigint_handler(int val)
 {
-    (void)val; //get rid of unused variable warning
-    dbg_print(TERM_YELLOW, "\nSIGINT caught, disconnecting\n");
-    sprintf((char*)tx_buff, "DISCxxxxxx"); //that "xxxxxx" is just a placeholder
-    memcpy(&tx_buff[4], config.enc_node, sizeof(config.enc_node));
-    refl_send(tx_buff, 4+6); //DISC
+	(void)val; //get rid of unused variable warning
+	dbg_print(TERM_YELLOW, "\nSIGINT caught, disconnecting\n");
+	sprintf((char*)tx_buff, "DISCxxxxxx"); //that "xxxxxx" is just a placeholder
+	memcpy(&tx_buff[4], config.enc_node, sizeof(config.enc_node));
+	refl_send(tx_buff, 4+6); //DISC
 
-    // Clean up GPIO resources
-    gpio_cleanup();
+	// Clean up GPIO resources
+	gpio_cleanup();
 
 	//close log file if necessary
 	if(logfile!=NULL)
@@ -771,8 +750,8 @@ void sigint_handler(int val)
 		fclose(logfile);
 	}
 
-    dbg_print(TERM_YELLOW, "Exiting\n");
-    exit(EXIT_SUCCESS);
+	dbg_print(TERM_YELLOW, "Exiting\n");
+	exit(EXIT_SUCCESS);
 }
 
 //samples per symbol (sps) = 5
@@ -821,7 +800,7 @@ int main(int argc, char* argv[])
 
 	//time
 	time_t rawtime;
-    struct tm *timeinfo;
+	struct tm *timeinfo;
 
 	if(argc<3)
 	{
@@ -937,13 +916,12 @@ int main(int argc, char* argv[])
 	//-----------------------------------device part-----------------------------------
 	dbg_print(0, "UART init: %s at %d...", (char*)config.uart, config.uart_rate);
 	fd=open((char*)config.uart, O_RDWR | O_NOCTTY | O_SYNC);
-	if(fd==0)
+	if(fd < 0)
 	{
 		dbg_print(TERM_RED, " error\nExiting\n");
 		exit(1);
 	}
 	
-	//set_blocking(fd, 0); //not required - VMIN and VTIME values are set with set_interface_attribs() below
 	set_interface_attribs(fd, config.uart_rate, 0);
 	dbg_print(TERM_GREEN, " OK\n");
 
@@ -951,14 +929,14 @@ int main(int argc, char* argv[])
 	dbg_print(0, "Radio board's reply to PING...");
 
 	dev_ping();
-	do
-	{
-		ioctl(fd, FIONREAD, &uart_byte_count);
-	}
-	while(uart_byte_count != 7);
-
 	uint8_t ping_test[7] = {0};
-	read(fd, ping_test, 7);
+	int rd = read(fd, ping_test, 7);
+
+	if (rd < 7)
+	{
+		dbg_print(TERM_RED, "PING: Timeout waiting for device response\n");
+		exit(EXIT_FAILURE);
+	}
 
 	uint32_t dev_err; memcpy((uint8_t*)&dev_err, &ping_test[3], sizeof(uint32_t));
 	if(ping_test[0]==CMD_PING && ping_test[1]==7 && ping_test[2]==0 && dev_err==0)
@@ -1046,12 +1024,19 @@ int main(int argc, char* argv[])
 
 	last_refl_ping = time(NULL);
 
+	fd_set rfds;
+	int maxfd = fd > sockt ? fd : sockt;
+
 	while(1)
 	{
-		//are there any new baseband samples to process?
-		ioctl(fd, FIONREAD, &uart_byte_count);
+		FD_ZERO(&rfds);
+		FD_SET(fd, &rfds);
+		FD_SET(sockt, &rfds);
 
-		if(uart_byte_count>0)
+		select(maxfd+1, &rfds, NULL, NULL, NULL);
+
+		//are there any new baseband samples to process?
+		if (FD_ISSET(fd, &rfds))
 		{
 			read(fd, (uint8_t*)&rx_bsb_sample, 1);
 
@@ -1433,9 +1418,8 @@ int main(int argc, char* argv[])
 			uart_rx_data_valid = 0;
 		}
 
-		//receive a packet - non-blocking
-		ioctl(sockt, FIONREAD, &socket_byte_count);
-		if(socket_byte_count>0)
+		//receive a packet - blocking
+		if (FD_ISSET(sockt, &rfds))
 		{
 			rx_len = recvfrom(sockt, rx_buff, MAX_UDP_LEN, 0, (struct sockaddr*)&saddr, (socklen_t*)&saddr_size);
 
@@ -1511,14 +1495,14 @@ int main(int argc, char* argv[])
 
 					//append CRC
 					uint16_t ccrc=LSF_CRC(&m17stream.lsf);
-            		m17stream.lsf.crc[0]=ccrc>>8;
-            		m17stream.lsf.crc[1]=ccrc&0xFF;
+					m17stream.lsf.crc[0]=ccrc>>8;
+					m17stream.lsf.crc[1]=ccrc&0xFF;
 
 					//log to file
 					if(logfile!=NULL)
 					{
 						time(&rawtime);
-    					timeinfo=localtime(&rawtime);
+						timeinfo=localtime(&rawtime);
 						fprintf(logfile, "\"%02d:%02d:%02d\" \"%s\" \"%s\" \"Internet\" \"--\" \"--\"\n",
 							timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec,
 							src_call, dst_call);
@@ -1569,7 +1553,7 @@ int main(int argc, char* argv[])
 				}
 
 				time(&rawtime);
-    			timeinfo=localtime(&rawtime);
+				timeinfo=localtime(&rawtime);
 
 				/*dbg_print(TERM_YELLOW, "[%02d:%02d:%02d] NET FRM: ",
 						timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
@@ -1590,7 +1574,7 @@ int main(int argc, char* argv[])
 					write(fd, (uint8_t*)bsb_samples, sizeof(bsb_samples));
 
 					time(&rawtime);
-    				timeinfo=localtime(&rawtime);
+					timeinfo=localtime(&rawtime);
 
 					dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
 						timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
@@ -1603,7 +1587,7 @@ int main(int argc, char* argv[])
 					//restart RX
 					dev_start_rx();
 					time(&rawtime);
-    				timeinfo=localtime(&rawtime);
+					timeinfo=localtime(&rawtime);
 					dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
 						timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
 					dbg_print(TERM_GREEN, " RX start\n");
@@ -1747,7 +1731,7 @@ int main(int argc, char* argv[])
 		if(tx_state==TX_ACTIVE && (get_ms()-tx_timer)>240) //240ms timeout
 		{
 			time(&rawtime);
-    		timeinfo=localtime(&rawtime);
+			timeinfo=localtime(&rawtime);
 
 			dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
 				timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
@@ -1760,7 +1744,7 @@ int main(int argc, char* argv[])
 			//restart RX
 			dev_start_rx();
 			time(&rawtime);
-    		timeinfo=localtime(&rawtime);
+			timeinfo=localtime(&rawtime);
 			dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
 				timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
 			dbg_print(TERM_GREEN, " RX start\n");
