@@ -131,6 +131,7 @@ int8_t raw_bsb_rx[960];
 uint16_t rx_buff_cnt;
 uint8_t uart_rx_sync;
 uint8_t uart_rx_data_valid;
+volatile uint8_t uart_lock;
 
 enum rx_state_t rx_state=RX_IDLE;
 enum tx_state_t tx_state=TX_IDLE;
@@ -709,29 +710,146 @@ void dev_set_tx_power(float power) //powr in dBm
 	}
 }
 
-void dev_start_tx(void)
+int8_t dev_start_tx(void)
 {
-	uint8_t cmd[3+1] = {CMD_TX_START, 4, 0, 1};
-	write(fd, cmd, 4);
+    uint8_t cmd[4] = {CMD_TX_START, 4, 0, 1};
+    uint8_t resp[4] = {0};
+
+    uart_lock = 1;            //prevent main loop from reading
+    tcflush(fd, TCIFLUSH);    //clear leftover bytes
+
+    write(fd, cmd, 4);
+
+    int rd = 0;
+    while (rd < 4)
+	{
+        int r = read(fd, resp + rd, 4 - rd);
+        if (r <= 0)
+		{
+            uart_lock = 0;
+            //dbg_print(TERM_RED, "%s(): Timeout\n", __func__);
+            return -1;
+        }
+        rd += r;
+    }
+
+    uart_lock = 0;
+
+    if (memcmp(resp, (uint8_t[]){CMD_TX_START, 4, 0, 0}, 4) == 0)
+	{
+        //dbg_print(TERM_GREEN, "%s(): OK\n", __func__);
+        return 0;
+    }
+
+    //dbg_print(TERM_RED, "%s(): Bad resp = %02X %02X %02X %02X\n", __func__, resp[0], resp[1], resp[2], resp[3]);
+    return -1;
 }
 
-void dev_stop_tx(void)
+int8_t dev_stop_tx(void)
 {
-	uint8_t cmd[3+1] = {CMD_TX_START, 4, 0, 0};
-	write(fd, cmd, 4);
+    uint8_t cmd[4] = {CMD_TX_START, 4, 0, 0};
+    uint8_t resp[4] = {0};
+
+    uart_lock = 1;            //prevent main loop from reading
+    tcflush(fd, TCIFLUSH);    //clear leftover bytes
+
+    write(fd, cmd, 4);
+
+    int rd = 0;
+    while (rd < 4)
+	{
+        int r = read(fd, resp + rd, 4 - rd);
+        if (r <= 0)
+		{
+            uart_lock = 0;
+            //dbg_print(TERM_RED, "%s(): Timeout\n", __func__);
+            return -1;
+        }
+        rd += r;
+    }
+
+    uart_lock = 0;
+
+    if (memcmp(resp, (uint8_t[]){CMD_TX_START, 4, 0, 0}, 4) == 0)
+	{
+        //dbg_print(TERM_GREEN, "%s(): OK\n", __func__);
+        return 0;
+    }
+
+    //dbg_print(TERM_RED, "%s(): Bad resp = %02X %02X %02X %02X\n", __func__, resp[0], resp[1], resp[2], resp[3]);
+    return -1;
 }
 
-void dev_start_rx(void) //start reception
+int8_t dev_start_rx(void) //start reception
 {
-	uint8_t cmd[3+1] = {CMD_RX_START, 4, 0, 1};
-	write(fd, cmd, 4);
+    uint8_t cmd[4] = {CMD_RX_START, 4, 0, 1};
+    uint8_t resp[4] = {0};
+
+    uart_lock = 1;            //prevent main loop from reading
+    tcflush(fd, TCIFLUSH);    //clear leftover bytes
+
+    write(fd, cmd, 4);
+
+    int rd = 0;
+    while (rd < 4)
+	{
+        int r = read(fd, resp + rd, 4 - rd);
+        if (r <= 0)
+		{
+            uart_lock = 0;
+            //dbg_print(TERM_RED, "%s(): Timeout\n", __func__);
+            return -1;
+        }
+        rd += r;
+    }
+
+    uart_lock = 0;
+
+    if (memcmp(resp, (uint8_t[]){CMD_RX_START, 4, 0, 0}, 4) == 0)
+	{
+        //dbg_print(TERM_GREEN, "%s(): OK\n", __func__);
+        return 0;
+    }
+
+    //dbg_print(TERM_RED, "%s(): Bad resp = %02X %02X %02X %02X\n", __func__, resp[0], resp[1], resp[2], resp[3]);
+    return -1;
 }
 
-void dev_stop_rx(void) //stop reception
+int8_t dev_stop_rx(void) //stop reception
 {
-	uint8_t cmd[3+1] = {CMD_RX_START, 4, 0, 0};
-	write(fd, cmd, 4);
+    uint8_t cmd[4] = {CMD_RX_START, 4, 0, 0};
+    uint8_t resp[4] = {0};
+
+    uart_lock = 1;            //prevent main loop from reading
+    tcflush(fd, TCIFLUSH);    //clear leftover bytes
+
+    write(fd, cmd, 4);
+
+    int rd = 0;
+    while (rd < 4)
+	{
+        int r = read(fd, resp + rd, 4 - rd);
+        if (r <= 0)
+		{
+            uart_lock = 0;
+            //dbg_print(TERM_RED, "%s(): Timeout\n", __func__);
+            return -1;
+        }
+        rd += r;
+    }
+
+    uart_lock = 0;
+
+    if (memcmp(resp, (uint8_t[]){CMD_RX_START, 4, 0, 0}, 4) == 0)
+	{
+        //dbg_print(TERM_GREEN, "%s(): OK\n", __func__);
+        return 0;
+    }
+
+    //dbg_print(TERM_RED, "%s(): Bad resp = %02X %02X %02X %02X\n", __func__, resp[0], resp[1], resp[2], resp[3]);
+    return -1;
 }
+
 
 void sigint_handler(int val)
 {
@@ -1007,7 +1125,8 @@ int main(int argc, char* argv[])
 	}
 
 	//start RX
-	dev_start_rx();
+	while (dev_stop_tx() != 0) usleep(40e3);
+	while (dev_start_rx() != 0) usleep(40e3);
 	time(&rawtime);
 	timeinfo=localtime(&rawtime);
 	dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
@@ -1036,7 +1155,7 @@ int main(int argc, char* argv[])
 		select(maxfd+1, &rfds, NULL, NULL, NULL);
 
 		//are there any new baseband samples to process?
-		if (FD_ISSET(fd, &rfds))
+		if (!uart_lock && FD_ISSET(fd, &rfds))
 		{
 			read(fd, (uint8_t*)&rx_bsb_sample, 1);
 
@@ -1458,7 +1577,7 @@ int main(int argc, char* argv[])
 					//TODO: this needs to happen every time a new transmission appears
 					//dev_stop_rx();
 					//dbg_print(0, "RX stop\n");
-					usleep(10*1000U);
+					usleep(10e3);
 
 					//extract data
 					memcpy(m17stream.lsf.dst, "\xFF\xFF\xFF\xFF\xFF\xFF", 6);
@@ -1509,12 +1628,18 @@ int main(int argc, char* argv[])
 							src_call, dst_call);
 					}
 
+					time(&rawtime);
+					timeinfo=localtime(&rawtime);
+					dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
+						timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+					dbg_print(TERM_GREEN, " Stream TX start\n");
+
 					//stop RX, set PA_EN=1 and initialize TX
-					dev_stop_rx();
-					usleep(2*1000U);
+					while (dev_stop_rx() != 0) usleep(40e3);
+					usleep(2e3);
 					gpio_set(config.pa_en, 1);
-					dev_start_tx();
-					usleep(10*1000U);
+					while (dev_start_tx() != 0) usleep(40e3);
+					usleep(10e3);
 
 					//flush the RRC baseband filter
 					filter_symbols(NULL, NULL, NULL, 0);
@@ -1585,13 +1710,14 @@ int main(int argc, char* argv[])
 					dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
 						timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
 					dbg_print(TERM_GREEN, " Stream TX end\n");
-					usleep(10*40000U); //wait 400ms (10 M17 frames)
+					usleep(3*40e3); //wait 120ms (3 M17 frames)
 					
 					//disable TX
 					gpio_set(config.pa_en, 0);
 
 					//restart RX
-					dev_start_rx();
+					while (dev_stop_tx() != 0) usleep(40e3);
+					while (dev_start_rx() != 0) usleep(40e3);
 					time(&rawtime);
 					timeinfo=localtime(&rawtime);
 					dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
@@ -1649,14 +1775,14 @@ int main(int argc, char* argv[])
 				timeinfo=localtime(&rawtime);
 				dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
 					timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-				dbg_print(TERM_GREEN, " PKT TX start\n");
+				dbg_print(TERM_GREEN, " Packet TX start\n");
 
 				//stop RX, set PA_EN=1 and initialize TX
-				dev_stop_rx();
-				usleep(2*1000U);
+				while (dev_stop_rx() != 0) usleep(40e3);
+				usleep(2e3);
 				gpio_set(config.pa_en, 1);
-				dev_start_tx();
-				usleep(10*1000U);
+				while (dev_start_tx() != 0) usleep(40e3);
+				usleep(10e3);
 				
 				//flush the RRC baseband filter
 				filter_symbols(NULL, NULL, NULL, 0);
@@ -1721,18 +1847,21 @@ int main(int argc, char* argv[])
 				dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
 					timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
 				dbg_print(TERM_GREEN, " PKT TX end\n");
-				usleep(10*40000U); //wait 400ms (10 M17 frames)
+				usleep(3*40e3); //wait 120ms (3 M17 frames)
 				
 				//disable TX
 				gpio_set(config.pa_en, 0);
 
 				//restart RX
-				dev_start_rx();
+				while (dev_stop_tx() != 0) usleep(40e3);
+				while (dev_start_rx() != 0) usleep(40e3);
 				time(&rawtime);
 				timeinfo=localtime(&rawtime);
 				dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
 					timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
 				dbg_print(TERM_GREEN, " RX start\n");
+
+				tx_state = TX_IDLE;
 			}
 
 			//clear the rx_buff
@@ -1748,13 +1877,14 @@ int main(int argc, char* argv[])
 			dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
 				timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
 			dbg_print(TERM_GREEN, " TX timeout\n");
-			//usleep(10*40000U); //wait 400ms (10 M17 frames)
+			//usleep(10*40e3); //wait 400ms (10 M17 frames)
 			
 			//disable TX
 			gpio_set(config.pa_en, 0);
 
 			//restart RX
-			dev_start_rx();
+			while (dev_stop_tx() != 0) usleep(40e3);
+			while (dev_start_rx() != 0) usleep(40e3);
 			time(&rawtime);
 			timeinfo=localtime(&rawtime);
 			dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
