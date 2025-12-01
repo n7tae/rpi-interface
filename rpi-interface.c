@@ -1,7 +1,7 @@
 /*
  * rpi-interface.c
  *
- * Edited on: Nov 30, 2025
+ * Edited on: Dec 1, 2025
  * Author: Wojciech Kaczmarski, SP5WWP
  *         M17 Foundation
  */
@@ -120,6 +120,19 @@ enum tx_state_t
 {
 	TX_IDLE,
 	TX_ACTIVE
+};
+
+enum err_t
+{
+	ERR_OK,					//all good
+	ERR_TRX_PLL,			//TRX PLL lock error
+	ERR_TRX_SPI,			//TRX SPI comms error
+	ERR_RANGE,				//value out of range
+	ERR_CMD_MALFORM,		//malformed command
+	ERR_BUSY,				//busy!
+	ERR_BUFF_FULL,			//buffer full
+	ERR_NOP,				//nothing to do
+	ERR_OTHER
 };
 
 int8_t flt_buff[8*5+1];						//length of this has to match RRC filter's length
@@ -578,141 +591,197 @@ void dev_ping(void)
 	write(fd, cmd, 3);
 }
 
-void dev_set_rx_freq(uint32_t freq)
+int8_t dev_set_rx_freq(uint32_t freq)
 {
-	uint8_t cmd[3+4] = {CMD_SET_RX_FREQ, 7, 0};
-	memcpy(&cmd[3], (uint8_t*)&freq, 4);
-	write(fd, cmd, 7);
-	
-	//wait for device's response
+	uint8_t cid = CMD_SET_RX_FREQ;
+	uint8_t cmd[3+4] = {cid, 4, 0};
+	memcpy(&cmd[3], (uint8_t*)&freq, sizeof(freq));
 	uint8_t resp[4] = {0};
-	int rd = read(fd, resp, 4);
 
-	if (rd < 4)
+	uart_lock = 1;            //prevent main loop from reading
+    tcflush(fd, TCIFLUSH);    //clear leftover bytes
+
+    write(fd, cmd, 4);
+
+    int rd = 0;
+    while (rd < 4)
 	{
-		dbg_print(TERM_RED, "%s(): Timeout waiting for device response\n", __func__);
-		return;
-	}
-	
-	if(resp[3]==0)
+        int r = read(fd, resp + rd, 4 - rd);
+        if (r <= 0)
+		{
+            uart_lock = 0;
+            //dbg_print(TERM_RED, "%s(): Timeout waiting for device response\n", __func__);
+            return -1;
+        }
+        rd += r;
+    }
+
+    uart_lock = 0;
+
+    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0)
 	{
 		dbg_print(0, "RX frequency: ");
-		dbg_print(TERM_GREEN, "%lu Hz\n", config.rx_freq); //OK
-	}
-	else
-	{
-		dbg_print(TERM_YELLOW, "Error %d setting RX frequency: %lu Hz\n", resp[3], config.rx_freq); //error
-	}
+		dbg_print(TERM_GREEN, "%lu Hz\n", freq); //OK
+        return 0;
+    }
+
+    dbg_print(TERM_YELLOW, "Error %d setting RX frequency: %lu Hz\n", resp[3], freq); //error
+    return -1;
 }
 
-void dev_set_tx_freq(uint32_t freq)
+int8_t dev_set_tx_freq(uint32_t freq)
 {
-	uint8_t cmd[3+4] = {CMD_SET_TX_FREQ, 7, 0};
-	memcpy(&cmd[3], (uint8_t*)&freq, 4);
-	write(fd, cmd, 7);
-
-	//wait for device's response
+	uint8_t cid = CMD_SET_TX_FREQ;
+	uint8_t cmd[3+4] = {cid, 4, 0};
+	memcpy(&cmd[3], (uint8_t*)&freq, sizeof(freq));
 	uint8_t resp[4] = {0};
-	int rd = read(fd, resp, 4);
 
-	if (rd < 4)
+	uart_lock = 1;            //prevent main loop from reading
+    tcflush(fd, TCIFLUSH);    //clear leftover bytes
+
+    write(fd, cmd, 4);
+
+    int rd = 0;
+    while (rd < 4)
 	{
-		dbg_print(TERM_RED, "%s(): Timeout waiting for device response\n", __func__);
-		return;
-	}
-	
-	if(resp[3]==0)
+        int r = read(fd, resp + rd, 4 - rd);
+        if (r <= 0)
+		{
+            uart_lock = 0;
+            //dbg_print(TERM_RED, "%s(): Timeout waiting for device response\n", __func__);
+            return -1;
+        }
+        rd += r;
+    }
+
+    uart_lock = 0;
+
+    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0)
 	{
 		dbg_print(0, "TX frequency: ");
-		dbg_print(TERM_GREEN, "%lu Hz\n", config.tx_freq); //OK
-	}
-	else
-	{
-		dbg_print(TERM_YELLOW, "Error %d setting TX frequency: %lu Hz\n", resp[3], config.tx_freq); //error
-	}
+		dbg_print(TERM_GREEN, "%lu Hz\n", freq); //OK
+        return 0;
+    }
+
+    dbg_print(TERM_YELLOW, "Error %d setting TX frequency: %lu Hz\n", resp[3], freq); //error
+    return -1;
 }
 
-void dev_set_freq_corr(int16_t corr)
+int8_t dev_set_freq_corr(int16_t corr)
 {
-	uint8_t cmd[3+2] = {CMD_SET_FREQ_CORR, 5, 0};
-	memcpy(&cmd[3], (uint8_t*)&corr, 2);
-	write(fd, cmd, 5);
-
-	//wait for device's response
+	uint8_t cid = CMD_SET_FREQ_CORR;
+	uint8_t cmd[3+2] = {cid, 4, 0, corr&0xFF, (corr>>8)&0xFF};
 	uint8_t resp[4] = {0};
-	int rd = read(fd, resp, 4);
 
-	if (rd < 4)
+	uart_lock = 1;            //prevent main loop from reading
+    tcflush(fd, TCIFLUSH);    //clear leftover bytes
+
+    write(fd, cmd, 4);
+
+    int rd = 0;
+    while (rd < 4)
 	{
-		dbg_print(TERM_RED, "%s(): Timeout waiting for device response\n", __func__);
-		return;
-	}
-	
-	if(resp[3]==0)
+        int r = read(fd, resp + rd, 4 - rd);
+        if (r <= 0)
+		{
+            uart_lock = 0;
+            //dbg_print(TERM_RED, "%s(): Timeout\n", __func__);
+            return -1;
+        }
+        rd += r;
+    }
+
+    uart_lock = 0;
+
+    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0)
 	{
 		dbg_print(0, "Frequency correction: ");
-		dbg_print(TERM_GREEN, "%d\n", config.freq_corr); //OK
-	}
-	else
-	{
-		dbg_print(TERM_YELLOW, "Error %d setting frequency correction: %d\n", resp[3], config.freq_corr); //error
-	}
+		dbg_print(TERM_GREEN, "%d\n", corr); //OK
+        return 0;
+    }
+
+    dbg_print(TERM_YELLOW, "Error %d setting frequency correction: %d\n", resp[3], corr); //error
+    return -1;
 }
 
-void dev_set_afc(uint8_t en)
+int8_t dev_set_afc(uint8_t en)
 {
-	uint8_t cmd[3+1] = {CMD_SET_AFC, 4, 0, en==0?0:1};
-	write(fd, cmd, 4);
-
-	//wait for device's response
+	uint8_t cid = CMD_SET_AFC;
+	uint8_t cmd[3+1] = {cid, 4, 0, en==0?0:1};
 	uint8_t resp[4] = {0};
-	int rd = read(fd, resp, 4);
 
-	if (rd < 4)
+	uart_lock = 1;            //prevent main loop from reading
+    tcflush(fd, TCIFLUSH);    //clear leftover bytes
+
+    write(fd, cmd, 4);
+
+    int rd = 0;
+    while (rd < 4)
 	{
-		dbg_print(TERM_RED, "%s(): Timeout waiting for device response\n", __func__);
-		return;
-	}
-	
-	if(resp[3]==0)
+        int r = read(fd, resp + rd, 4 - rd);
+        if (r <= 0)
+		{
+            uart_lock = 0;
+            //dbg_print(TERM_RED, "%s(): Timeout\n", __func__);
+            return -1;
+        }
+        rd += r;
+    }
+
+    uart_lock = 0;
+
+    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0)
 	{
-		; //OK
-	}
-	else
-	{
-		; //error
-	}
+		dbg_print(0, "AFC: ");
+		dbg_print(TERM_GREEN, "%s\n", en==0?"disabled":"enabled"); //OK
+        return 0;
+    }
+
+    dbg_print(TERM_YELLOW, "Error setting AFC\n"); //error
+    return -1;
 }
 
-void dev_set_tx_power(float power) //powr in dBm
+int8_t dev_set_tx_power(float power) //powr in dBm
 {
-	uint8_t cmd[3+1] = {CMD_SET_TX_POWER, 4, 0, roundf(power*4.0f)};
-	write(fd, cmd, 4);
-
-	//wait for device's response
+	uint8_t cid = CMD_SET_TX_POWER;
+	uint8_t cmd[3+1] = {cid, 4, 0, roundf(power*4.0f)};
 	uint8_t resp[4] = {0};
-	int rd = read(fd, resp, 4);
 
-	if (rd < 4)
+	uart_lock = 1;            //prevent main loop from reading
+    tcflush(fd, TCIFLUSH);    //clear leftover bytes
+
+    write(fd, cmd, 4);
+
+    int rd = 0;
+    while (rd < 4)
 	{
-		dbg_print(TERM_RED, "%s(): Timeout waiting for device response\n", __func__);
-		return;
-	}
-	
-	if(resp[3]==0)
+        int r = read(fd, resp + rd, 4 - rd);
+        if (r <= 0)
+		{
+            uart_lock = 0;
+            //dbg_print(TERM_RED, "%s(): Timeout\n", __func__);
+            return -1;
+        }
+        rd += r;
+    }
+
+    uart_lock = 0;
+
+    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0)
 	{
 		dbg_print(0, "TX power: ");
-		dbg_print(TERM_GREEN, "%2.2f dBm\n", config.tx_pwr); //OK
-	}
-	else
-	{
-		dbg_print(TERM_YELLOW, "Error %d setting TX power: %2.2f dBm\n", resp[3], config.tx_pwr); //error
-	}
+		dbg_print(TERM_GREEN, "%2.2f dBm\n", power); //OK
+        return 0;
+    }
+
+    dbg_print(TERM_YELLOW, "Error %d setting TX power: %2.2f dBm\n", resp[3], power); //error
+    return -1;
 }
 
 int8_t dev_start_tx(void)
 {
-    uint8_t cmd[4] = {CMD_TX_START, 4, 0, 1};
+	uint8_t cid = CMD_TX_START;
+    uint8_t cmd[4] = {cid, 4, 0, 1};
     uint8_t resp[4] = {0};
 
     uart_lock = 1;            //prevent main loop from reading
@@ -735,7 +804,8 @@ int8_t dev_start_tx(void)
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){CMD_TX_START, 4, 0, 0}, 4) == 0)
+    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0 ||
+		memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_NOP}, 4) == 0)
 	{
         //dbg_print(TERM_GREEN, "%s(): OK\n", __func__);
         return 0;
@@ -747,7 +817,8 @@ int8_t dev_start_tx(void)
 
 int8_t dev_stop_tx(void)
 {
-    uint8_t cmd[4] = {CMD_TX_START, 4, 0, 0};
+	uint8_t cid = CMD_TX_START;
+    uint8_t cmd[4] = {cid, 4, 0, 0};
     uint8_t resp[4] = {0};
 
     uart_lock = 1;            //prevent main loop from reading
@@ -770,7 +841,8 @@ int8_t dev_stop_tx(void)
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){CMD_TX_START, 4, 0, 0}, 4) == 0)
+    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0 ||
+		memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_NOP}, 4) == 0)
 	{
         //dbg_print(TERM_GREEN, "%s(): OK\n", __func__);
         return 0;
@@ -782,7 +854,8 @@ int8_t dev_stop_tx(void)
 
 int8_t dev_start_rx(void) //start reception
 {
-    uint8_t cmd[4] = {CMD_RX_START, 4, 0, 1};
+	uint8_t cid = CMD_RX_START;
+    uint8_t cmd[4] = {cid, 4, 0, 1};
     uint8_t resp[4] = {0};
 
     uart_lock = 1;            //prevent main loop from reading
@@ -805,7 +878,8 @@ int8_t dev_start_rx(void) //start reception
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){CMD_RX_START, 4, 0, 0}, 4) == 0)
+    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0 ||
+		memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_NOP}, 4) == 0)
 	{
         //dbg_print(TERM_GREEN, "%s(): OK\n", __func__);
         return 0;
@@ -817,7 +891,8 @@ int8_t dev_start_rx(void) //start reception
 
 int8_t dev_stop_rx(void) //stop reception
 {
-    uint8_t cmd[4] = {CMD_RX_START, 4, 0, 0};
+	uint8_t cid = CMD_RX_START;
+    uint8_t cmd[4] = {cid, 4, 0, 0};
     uint8_t resp[4] = {0};
 
     uart_lock = 1;            //prevent main loop from reading
@@ -840,7 +915,8 @@ int8_t dev_stop_rx(void) //stop reception
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){CMD_RX_START, 4, 0, 0}, 4) == 0)
+    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0 ||
+		memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_NOP}, 4) == 0)
 	{
         //dbg_print(TERM_GREEN, "%s(): OK\n", __func__);
         return 0;
