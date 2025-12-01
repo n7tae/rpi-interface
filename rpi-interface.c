@@ -594,14 +594,14 @@ void dev_ping(void)
 int8_t dev_set_rx_freq(uint32_t freq)
 {
 	uint8_t cid = CMD_SET_RX_FREQ;
-	uint8_t cmd[3+4] = {cid, 4, 0};
+	uint8_t cmd[3+4] = {cid, 7, 0};
 	memcpy(&cmd[3], (uint8_t*)&freq, sizeof(freq));
 	uint8_t resp[4] = {0};
 
 	uart_lock = 1;            //prevent main loop from reading
     tcflush(fd, TCIFLUSH);    //clear leftover bytes
 
-    write(fd, cmd, 4);
+    write(fd, cmd, 7);
 
     int rd = 0;
     while (rd < 4)
@@ -632,14 +632,14 @@ int8_t dev_set_rx_freq(uint32_t freq)
 int8_t dev_set_tx_freq(uint32_t freq)
 {
 	uint8_t cid = CMD_SET_TX_FREQ;
-	uint8_t cmd[3+4] = {cid, 4, 0};
+	uint8_t cmd[3+4] = {cid, 7, 0};
 	memcpy(&cmd[3], (uint8_t*)&freq, sizeof(freq));
 	uint8_t resp[4] = {0};
 
 	uart_lock = 1;            //prevent main loop from reading
     tcflush(fd, TCIFLUSH);    //clear leftover bytes
 
-    write(fd, cmd, 4);
+    write(fd, cmd, 7);
 
     int rd = 0;
     while (rd < 4)
@@ -670,13 +670,13 @@ int8_t dev_set_tx_freq(uint32_t freq)
 int8_t dev_set_freq_corr(int16_t corr)
 {
 	uint8_t cid = CMD_SET_FREQ_CORR;
-	uint8_t cmd[3+2] = {cid, 4, 0, corr&0xFF, (corr>>8)&0xFF};
+	uint8_t cmd[3+2] = {cid, 5, 0, corr&0xFF, (corr>>8)&0xFF};
 	uint8_t resp[4] = {0};
 
 	uart_lock = 1;            //prevent main loop from reading
     tcflush(fd, TCIFLUSH);    //clear leftover bytes
 
-    write(fd, cmd, 4);
+    write(fd, cmd, 5);
 
     int rd = 0;
     while (rd < 4)
@@ -1146,11 +1146,7 @@ int main(int argc, char* argv[])
 	dev_set_tx_freq(config.tx_freq);
 	dev_set_freq_corr(config.freq_corr);
 	dev_set_tx_power(config.tx_pwr);
-	dbg_print(0, "AFC "); dev_set_afc(config.afc);
-	if(config.afc)
-		dbg_print(TERM_GREEN, "enabled\n");
-	else
-		dbg_print(TERM_GREEN, "disabled\n");
+	dev_set_afc(config.afc);
 
 	//-----------------------------------internet part-----------------------------------
 	dbg_print(0, "Connecting to %s:%d (%s) module %c as \"%s\"", config.refl_addr, config.refl_port, config.reflector, config.module, config.node);
