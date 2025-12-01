@@ -1796,7 +1796,7 @@ int main(int argc, char* argv[])
 					dbg_print(TERM_SKYBLUE, "[%02d:%02d:%02d]",
 						timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
 					dbg_print(TERM_GREEN, " Stream TX end\n");
-					usleep(3*40e3); //wait 120ms (3 M17 frames)
+					usleep(8*40e3); //wait 320ms (8 M17 frames) - let the transmitter consume all the buffered samples
 					
 					//disable TX
 					gpio_set(config.pa_en, 0);
