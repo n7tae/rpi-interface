@@ -585,10 +585,42 @@ void refl_send(const uint8_t* msg, uint16_t len)
 }
 
 //device config funcs
-void dev_ping(void)
+int8_t dev_ping(void)
 {
-	uint8_t cmd[3] = {CMD_PING, 3, 0};
-	write(fd, cmd, 3);
+	uint8_t cid = CMD_PING;
+	uint8_t cmd[3] = {cid, 3, 0};
+	uint8_t resp[7] = {0};
+
+	uart_lock = 1;            //prevent main loop from reading
+    tcflush(fd, TCIFLUSH);    //clear leftover bytes
+
+    write(fd, cmd, 3);
+
+    int rd = 0;
+    while (rd < 7)
+	{
+        int r = read(fd, resp + rd, 7 - rd);
+        if (r <= 0)
+		{
+            uart_lock = 0;
+            dbg_print(TERM_RED, "PING: Timeout waiting for device response\n");
+            return -1;
+        }
+        rd += r;
+    }
+
+    uart_lock = 0;
+
+    if (memcmp(resp, (uint8_t[]){cid, 7, 0, 0, 0, 0, 0}, 7) == 0)
+	{
+		dbg_print(TERM_GREEN, "PONG OK\n"); //OK
+        return 0;
+    }
+
+	uint32_t dev_err;
+	memcpy((uint8_t*)&dev_err, &resp[3], sizeof(uint32_t));
+    dbg_print(TERM_YELLOW, "PONG error code: 0x%04X\n", dev_err);
+    return -1;
 }
 
 int8_t dev_set_rx_freq(uint32_t freq)
@@ -1120,26 +1152,8 @@ int main(int argc, char* argv[])
 	dbg_print(TERM_GREEN, " OK\n");
 
 	//PING-PONG test
-	dbg_print(0, "Radio board's reply to PING...");
-
+	dbg_print(0, "Radio board's reply to PING... ");
 	dev_ping();
-	uint8_t ping_test[7] = {0};
-	int rd = read(fd, ping_test, 7);
-
-	if (rd < 7)
-	{
-		dbg_print(TERM_RED, "PING: Timeout waiting for device response\n");
-		exit(EXIT_FAILURE);
-	}
-
-	uint32_t dev_err; memcpy((uint8_t*)&dev_err, &ping_test[3], sizeof(uint32_t));
-	if(ping_test[0]==CMD_PING && ping_test[1]==7 && ping_test[2]==0 && dev_err==0)
-		dbg_print(TERM_GREEN, " PONG OK\n");
-	else
-	{
-		dbg_print(TERM_YELLOW, " PONG error code: 0x%04X\n", dev_err);
-		//return 1;
-	}
 
 	//config the device
 	dev_set_rx_freq(config.rx_freq);
