@@ -1732,7 +1732,7 @@ int main(int argc, char* argv[])
 		if(time(NULL)-last_refl_ping>30)
 		{
 			//for now, just cry about it and quit
-			dbg_print(TERM_RED, "Lost connection with the reflector\nExiting");
+			dbg_print(TERM_RED, "Lost connection with the reflector\nExiting\n");
 
 			//cleanup gpios
 			gpio_cleanup();
@@ -1750,5 +1750,6 @@ int main(int argc, char* argv[])
 	//should never get here	
 	return 0;
 }
+
 
 
