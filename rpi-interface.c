@@ -1,7 +1,7 @@
 /*
  * rpi-interface.c
  *
- * Edited on: Dec 1, 2025
+ * Edited on: Dec 22, 2025
  * Author: Wojciech Kaczmarski, SP5WWP
  *         M17 Foundation
  */
@@ -981,7 +981,8 @@ void sigint_handler(int val)
 }
 
 //samples per symbol (sps) = 5
-void filter_symbols(int8_t *out, const int8_t *in, const float* flt, uint8_t phase_inv)
+//old code - deprecated
+/*void filter_symbols(int8_t *out, const int8_t *in, const float* flt, uint8_t phase_inv)
 {
 	#define FLT_LEN 41
 	static int8_t last[FLT_LEN]; //memory for last symbols
@@ -1017,6 +1018,63 @@ void filter_symbols(int8_t *out, const int8_t *in, const float* flt, uint8_t pha
 	{
 		for(uint8_t i=0; i<FLT_LEN; i++)
 			last[i]=0;
+	}
+}*/
+
+//new, polyphase filter implementation
+void filter_symbols(int8_t* __restrict out, const int8_t* __restrict in, const float* __restrict flt, uint8_t phase_inv)
+{
+	#define FLT_LEN 41
+    #define TAPS_PER_PHASE 9
+
+	//history
+	static float sr[TAPS_PER_PHASE * 2] = {0};
+	static uint8_t w = 0;
+
+	//precompute gain and sign once
+    static const float gain = TX_SYMBOL_SCALING_COEFF*sqrtf(5.0f);
+	const float sign = phase_inv ? -1.0f : 1.0f;
+
+	for (uint16_t i = 0; i < SYM_PER_FRA; i++)
+	{
+		//insert new sample per symbol
+		const float x = (float)in[i] * sign;
+
+		//store once, duplicated for linear access
+		float * __restrict hp = &sr[w];
+		hp[0]			   = x;
+		hp[TAPS_PER_PHASE] = x;
+
+		//phase pointer
+		const float * __restrict tp = flt;
+
+		//generate sps (5) output samples
+		for (uint8_t ph = 0; ph < 5; ph++)
+		{
+			float acc;
+
+			//fully unrolled 9-tap dot product
+			acc  = hp[0] * tp[0];
+			acc += hp[1] * tp[1];
+			acc += hp[2] * tp[2];
+			acc += hp[3] * tp[3];
+			acc += hp[4] * tp[4];
+			acc += hp[5] * tp[5];
+			acc += hp[6] * tp[6];
+			acc += hp[7] * tp[7];
+			acc += hp[8] * tp[8];
+
+			out[i*5 + ph] = (int8_t)(acc * gain);
+
+			//advance to next phase coefficients
+			tp += TAPS_PER_PHASE;
+		}
+
+		//circular index update without modulo
+		if (w == 0)
+			w = TAPS_PER_PHASE-1;
+		else
+			w--;
 	}
 }
 
@@ -1296,7 +1354,7 @@ int main(int argc, char* argv[])
 
 			for (uint16_t i=0; i<960; i++)
 			{
-				//push buffer
+				//push buffer TODO: please optimize this. eyes hurt
 				for(uint8_t i=0; i<sizeof(flt_buff)-1; i++)
 					flt_buff[i] = flt_buff[i+1];
 				flt_buff[sizeof(flt_buff)-1] = raw_bsb_rx[i];
@@ -1736,21 +1794,21 @@ int main(int argc, char* argv[])
 					gen_preamble_i8(frame_symbols, &frame_buff_cnt, PREAM_LSF);
 
 					//filter and send out to the device
-					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5, 0);
+					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
 					write(fd, bsb_samples, sizeof(bsb_samples));
 
 					//now the LSF
 					gen_frame_i8(frame_symbols, NULL, FRAME_LSF, &(m17stream.lsf), 0, 0);
 
 					//filter and send out to the device
-					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5, 0);
+					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
 					write(fd, bsb_samples, sizeof(bsb_samples));
 
 					//finally, the first frame
 					gen_frame_i8(frame_symbols, m17stream.pld, FRAME_STR, &(m17stream.lsf), (m17stream.fn&0x7FFFU)%6, m17stream.fn);
 
 					//filter and send out to the device
-					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5, 0);
+					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
 					write(fd, bsb_samples, sizeof(bsb_samples));
 				}
 				else
@@ -1759,7 +1817,7 @@ int main(int argc, char* argv[])
 					gen_frame_i8(frame_symbols, m17stream.pld, FRAME_STR, &(m17stream.lsf), (m17stream.fn&0x7FFFU)%6, m17stream.fn);
 
 					//filter and send out to the device
-					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5, 0);
+					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
 					write(fd, bsb_samples, sizeof(bsb_samples));
 				}
 
@@ -1781,7 +1839,7 @@ int main(int argc, char* argv[])
 					gen_eot_i8(frame_symbols, &frame_buff_cnt);
 
 					//filter and send out to the device
-					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5, 0);
+					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
 					write(fd, bsb_samples, sizeof(bsb_samples));
 
 					time(&rawtime);
@@ -1874,7 +1932,7 @@ int main(int argc, char* argv[])
 				gen_preamble_i8(frame_symbols, &frame_buff_cnt, PREAM_LSF);
 				
 				//filter and send out to the device
-				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
+				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
 				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
 				write(fd, bsb_samples, sizeof(bsb_samples));
 				
@@ -1882,7 +1940,7 @@ int main(int argc, char* argv[])
 				gen_frame_i8(frame_symbols, NULL, FRAME_LSF, (lsf_t*)&rx_buff[4], 0, 0);
 				
 				//filter and send out to the device
-				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
+				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
 				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
 				write(fd, bsb_samples, sizeof(bsb_samples));
 				
@@ -1896,7 +1954,7 @@ int main(int argc, char* argv[])
 					memcpy(pld, &rx_buff[4+240/8+frame*25], 25);
 					pld[25]=frame<<2;
 					gen_frame_i8(frame_symbols, pld, FRAME_PKT, NULL, 0, 0);
-					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
+					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
 					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
 					write(fd, bsb_samples, sizeof(bsb_samples));
 					pld_len-=25;
@@ -1907,7 +1965,7 @@ int main(int argc, char* argv[])
 				memcpy(pld, &rx_buff[4+240/8+frame*25], pld_len);
 				pld[25]=(1<<7)|(pld_len<<2); //EoT flag set, amount of remaining data in the 'frame number' field
 				gen_frame_i8(frame_symbols, pld, FRAME_PKT, NULL, 0, 0);
-				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
+				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
 				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
 				write(fd, bsb_samples, sizeof(bsb_samples));
 				usleep(40*1000U);
@@ -1917,7 +1975,7 @@ int main(int argc, char* argv[])
 				gen_eot_i8(frame_symbols, &frame_buff_cnt);
 
 				//filter and send out to the device
-				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
+				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
 				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
 				write(fd, bsb_samples, sizeof(bsb_samples));
 
