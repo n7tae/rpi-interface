@@ -1031,6 +1031,14 @@ void filter_symbols(int8_t* __restrict out, const int8_t* __restrict in, const f
 	static float sr[TAPS_PER_PHASE * 2] = {0};
 	static uint8_t w = 0;
 
+	//flush filter state
+	if (in == NULL)
+	{
+		memset(sr, 0, sizeof(sr));
+		w = 0;
+		return;
+	}
+
 	//precompute gain and sign once
     static const float gain = TX_SYMBOL_SCALING_COEFF*sqrtf(5.0f);
 	const float sign = phase_inv ? -1.0f : 1.0f;
@@ -2054,5 +2062,6 @@ int main(int argc, char* argv[])
 	//should never get here	
 	return 0;
 }
+
 
 
