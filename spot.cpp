@@ -9,7 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
+#include <cstdint>
+#include <cerrno>
 #include <math.h>
 #include <stdarg.h>
 
@@ -596,7 +597,8 @@ int8_t dev_ping(void)
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){cid, 7, 0, 0, 0, 0, 0}, 7) == 0)
+	const uint16_t good[7] {cid, 7, 0, 0, 0, 0, 0};
+    if (memcmp(resp, good, 7) == 0)
 	{
 		dbg_print(TERM_GREEN, "PONG OK\n"); //OK
         return 0;
@@ -635,7 +637,8 @@ int8_t dev_set_rx_freq(uint32_t freq)
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0)
+	const uint8_t good[4] = {cid, 4, 0, ERR_OK};
+    if (memcmp(resp, good, 4) == 0)
 	{
 		dbg_print(0, "RX frequency: ");
 		dbg_print(TERM_GREEN, "%lu Hz\n", freq); //OK
@@ -673,7 +676,8 @@ int8_t dev_set_tx_freq(uint32_t freq)
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0)
+	const uint8_t good[4] { cid, 4, 0, ERR_OK };
+    if (memcmp(resp, good, 4) == 0)
 	{
 		dbg_print(0, "TX frequency: ");
 		dbg_print(TERM_GREEN, "%lu Hz\n", freq); //OK
@@ -710,7 +714,8 @@ int8_t dev_set_freq_corr(int16_t corr)
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0)
+	const uint8_t good[4] {cid, 4, 0, ERR_OK};
+    if (memcmp(resp, good, 4) == 0)
 	{
 		dbg_print(0, "Frequency correction: ");
 		dbg_print(TERM_GREEN, "%d\n", corr); //OK
@@ -747,7 +752,8 @@ int8_t dev_set_afc(uint8_t en)
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0)
+	const uint8_t good[4] {cid, 4, 0, ERR_OK};
+    if (memcmp(resp, good, 4) == 0)
 	{
 		dbg_print(0, "AFC: ");
 		dbg_print(TERM_GREEN, "%s\n", en==0?"disabled":"enabled"); //OK
@@ -784,7 +790,8 @@ int8_t dev_set_tx_power(float power) //powr in dBm
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0)
+	uint8_t good[4] {cid, 4, 0, ERR_OK};
+    if (memcmp(resp, good, 4) == 0)
 	{
 		dbg_print(0, "TX power: ");
 		dbg_print(TERM_GREEN, "%2.2f dBm\n", power); //OK
@@ -821,8 +828,8 @@ int8_t dev_start_tx(void)
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0 ||
-		memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_NOP}, 4) == 0)
+	uint8_t good[3] { cid, 4, 0 };
+    if (0==memcmp(resp, good, 3) and (ERR_OK == resp[3] or ERR_NOP == resp[3]))
 	{
         //dbg_print(TERM_GREEN, "%s(): OK\n", __func__);
         return 0;
@@ -858,8 +865,8 @@ int8_t dev_stop_tx(void)
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0 ||
-		memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_NOP}, 4) == 0)
+	uint8_t good[3] { cid, 4, 0 };
+    if (0==memcmp(resp, good, 3) and (ERR_OK == resp[3] or ERR_NOP == resp[3]))
 	{
         //dbg_print(TERM_GREEN, "%s(): OK\n", __func__);
         return 0;
@@ -895,8 +902,8 @@ int8_t dev_start_rx(void) //start reception
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0 ||
-		memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_NOP}, 4) == 0)
+	uint8_t good[3] { cid, 4, 0 };
+    if (0==memcmp(resp, good, 3) and (ERR_OK == resp[3] or ERR_NOP == resp[3]))
 	{
         //dbg_print(TERM_GREEN, "%s(): OK\n", __func__);
         return 0;
@@ -932,8 +939,8 @@ int8_t dev_stop_rx(void) //stop reception
 
     uart_lock = 0;
 
-    if (memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_OK}, 4) == 0 ||
-		memcmp(resp, (uint8_t[]){cid, 4, 0, ERR_NOP}, 4) == 0)
+	uint8_t good[3] { cid, 4, 0 };
+    if (0==memcmp(resp, good, 3) and (ERR_OK == resp[3] or ERR_NOP == resp[3]))
 	{
         //dbg_print(TERM_GREEN, "%s(): OK\n", __func__);
         return 0;
@@ -1673,7 +1680,7 @@ int main(int argc, char* argv[])
 				memcpy(m17stream.pld, &rx_buff[(32+16+224+16)/8U], 128/8);
 
 				int8_t frame_symbols[SYM_PER_FRA];						//raw frame symbols
-				int8_t bsb_samples[963] = {CMD_TX_DATA, 0xC3, 0x03};	//baseband samples wrapped in a frame
+				int8_t bsb_samples[963] = {CMD_TX_DATA, -61, 3};	//baseband samples wrapped in a frame
 
 				if(tx_state==TX_IDLE) //first received frame
 				{
