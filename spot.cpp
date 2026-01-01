@@ -691,7 +691,7 @@ int8_t dev_set_tx_freq(uint32_t freq)
 int8_t dev_set_freq_corr(int16_t corr)
 {
 	uint8_t cid = CMD_SET_FREQ_CORR;
-	uint8_t cmd[3+2] = {cid, 5, 0, corr&0xFF, (corr>>8)&0xFF};
+	uint8_t cmd[3+2] = {cid, 5, 0, uint8_t(corr&0xffu), uint8_t((corr>>8)&0xffu)};
 	uint8_t resp[4] = {0};
 
 	uart_lock = 1;            //prevent main loop from reading
