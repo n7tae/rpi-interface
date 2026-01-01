@@ -1,10 +1,10 @@
-all: rpi-interface
+all: spot
 
-rpi-interface: rpi-interface.c
-	gcc -O2 -Wall -Wextra -Wno-unused-result rpi-interface.c -o rpi-interface -lm -lm17 -lzmq -lgpiod
+spot: spot.cpp
+	g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-result spot.cpp -o spot -lm -lm17 -lgpiod
 
 install: all
-	sudo install rpi-interface /usr/local/bin
+	sudo install spot /usr/local/bin
 
 clean:
-	rm -f rpi-interface
+	rm -f spot

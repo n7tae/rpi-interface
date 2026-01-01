@@ -17,4 +17,3 @@ rx_freq=433475000                       #Hz
 freq_corr=0                             #frequency correction (integer)
 tx_pwr=10.0                             #transmission power, dBm
 afc=1                                   #automatic frequency control (0-off, 1-on)
-#zmq_port=17017                         #ZMQ PUB port for the baseband signal

@@ -1,4 +1,4 @@
-# rpi-interface
+# spot
 Raspberry Pi interface for the M17 Project's [CC1200 HAT](https://github.com/M17-Project/CC1200_HAT-hw).
 
 ### Building
