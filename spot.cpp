@@ -729,7 +729,7 @@ int8_t dev_set_freq_corr(int16_t corr)
 int8_t dev_set_afc(uint8_t en)
 {
 	uint8_t cid = CMD_SET_AFC;
-	uint8_t cmd[3+1] = {cid, 4, 0, en==0?0:1};
+	uint8_t cmd[3+1] = {cid, 4, 0, uint8_t(en==0?0:1)};
 	uint8_t resp[4] = {0};
 
 	uart_lock = 1;            //prevent main loop from reading
@@ -767,7 +767,7 @@ int8_t dev_set_afc(uint8_t en)
 int8_t dev_set_tx_power(float power) //powr in dBm
 {
 	uint8_t cid = CMD_SET_TX_POWER;
-	uint8_t cmd[3+1] = {cid, 4, 0, roundf(power*4.0f)};
+	uint8_t cmd[3+1] = {cid, 4, 0, uint8_t(roundf(power*4.0f))};
 	uint8_t resp[4] = {0};
 
 	uart_lock = 1;            //prevent main loop from reading
