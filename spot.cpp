@@ -85,15 +85,13 @@ struct config_t
 	uint8_t afc;
 
 	//GPIO Pins
-	uint16_t pa_en;
 	uint16_t boot0;
 	uint16_t nrst;
 
 	//GPIO resources (handles)
 	struct gpiod_chip *gpio_chip;
-	struct gpiod_line *pa_en_line;
-	struct gpiod_line *boot0_line;
-	struct gpiod_line *nrst_line;
+	struct gpiod_line_request *boot0_line;
+	struct gpiod_line_request *nrst_line;
 } config;
 
 //device stuff
@@ -185,11 +183,6 @@ void dbg_print(const char* color_code, const char* fmt, ...)
 	{
 		fputs(str, stdout);
 	}
-}
-
-void move_cursor(uint8_t x, uint8_t y)
-{
-	printf("\033[%d;%dH", y, x);
 }
 
 uint32_t get_ms(void)
@@ -297,24 +290,6 @@ int set_interface_attribs(int fd, uint32_t speed, int parity)
 	return 0;
 }
 
-/**
- * @brief Replaces the first character with ASCII code under 0x20 with 0x00 (null termination).
- * rtrim() scans the input string left to right.
- * 
- * @param inp Pointer to a string with text to trim.
- */
-void rtrim(uint8_t* inp)
-{
-	for(uint8_t i=0; i<strlen((char*)inp); i++)
-	{
-		if(inp[i]<' ')
-		{
-			inp[i]=0;
-			break;
-		}
-	}
-}
-
 int8_t load_config(struct config_t *cfg, char *path)
 {
 	FILE* cfg_fp=fopen(path, "r");
@@ -335,7 +310,6 @@ int8_t load_config(struct config_t *cfg, char *path)
 	cfg->tx_pwr=10.0f;
 	cfg->afc=0;
 	cfg->nrst=21;
-	cfg->pa_en=18;
 	cfg->boot0=20;
 
 	//overwrite settings
@@ -392,10 +366,6 @@ int8_t load_config(struct config_t *cfg, char *path)
 			{
 				cfg->nrst=atoi(strstr(line, "=")+1);
 			}
-			else if(strstr(line, "pa_en")==line)
-			{
-				cfg->pa_en=atoi(strstr(line, "=")+1);
-			}
 			else if(strstr(line, "boot0")==line)
 			{
 				cfg->boot0=atoi(strstr(line, "=")+1);
@@ -435,129 +405,113 @@ int8_t load_config(struct config_t *cfg, char *path)
 	}
 }
 
+struct gpiod_line_request *gpioLineRequest(unsigned int offset, int value, const char *consumer)
+{
+	struct gpiod_request_config *req_cfg = nullptr;
+	struct gpiod_line_request *request = nullptr;
+	struct gpiod_line_settings *settings;
+	struct gpiod_line_config *line_cfg = nullptr;
+
+	if (nullptr == config.gpio_chip) 
+		return nullptr;
+
+	settings = gpiod_line_settings_new();
+	if (nullptr == settings)
+	{
+		dbg_print(TERM_RED, "Could not create settings for gpio line #%u\n", offset);
+	} else {
+		if (gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_OUTPUT) or gpiod_line_settings_set_output_value(settings, value ? GPIOD_LINE_VALUE_ACTIVE : GPIOD_LINE_VALUE_INACTIVE))
+		{
+			dbg_print(TERM_RED, "Could not adjust settings for gpio line #%u\n", offset);
+		} else {
+			line_cfg = gpiod_line_config_new();
+			if (nullptr == line_cfg)
+			{
+				dbg_print(TERM_RED, "Could not create new config for gpio line #%u\n", offset);
+			} else {
+				if (gpiod_line_config_add_line_settings(line_cfg, &offset, 1, settings))
+				{
+					dbg_print(TERM_RED, "could not add settings to config of gpio line #%u\n", offset);
+				} else {
+					req_cfg = gpiod_request_config_new();
+					if (req_cfg)
+					{
+						gpiod_request_config_set_consumer(req_cfg, (not consumer) ? "SPOT" : consumer);
+						request = gpiod_chip_request_lines(config.gpio_chip, req_cfg, line_cfg);
+						if (nullptr == request)
+							dbg_print(TERM_RED, "Could not open offset %u on configured gpio device\n", offset);
+					}
+				}
+			}
+		}
+	}
+
+	if (req_cfg)
+		gpiod_request_config_free(req_cfg);
+	if (line_cfg)
+		gpiod_line_config_free(line_cfg);
+	if (settings)
+		gpiod_line_settings_free(settings);
+
+	return request;
+}
+// returns true on error
+bool gpioSetValue(unsigned offset, int value)
+{
+	gpiod_line_request *lr = nullptr;
+	if (config.boot0 == offset)
+		lr = config.boot0_line;
+	else if (config.nrst == offset)
+		lr = config.nrst_line;
+	else {
+		dbg_print(TERM_RED, "gpioSetValue error: offset %u not confiugred\n", offset);
+		return true;
+	}
+
+	if (gpiod_line_request_set_value(lr, offset, value ? GPIOD_LINE_VALUE_ACTIVE : GPIOD_LINE_VALUE_INACTIVE))
+	{
+		dbg_print(TERM_RED, "Could not set gpio line #%u to %d\n", offset, value);
+		return true;
+	}
+	return false;
+}
+
+bool gpio_init(const char *consumer)
+{
+	const char *chip = "/dev/gpiochip0";
+	config.gpio_chip = gpiod_chip_open(chip);
+	if (config.gpio_chip) {
+		dbg_print(TERM_GREEN, "%s opened\n", chip);
+	} else {
+		dbg_print(TERM_RED, "Could not open %s\n", chip);
+		return true;
+	}
+	config.boot0_line = gpioLineRequest(config.boot0, 0, consumer);
+	if (NULL == config.boot0_line)
+		return true;
+	config.nrst_line = gpioLineRequest(config.nrst, 0, consumer);
+	if (NULL == config.nrst_line)
+		return true;
+	return false;
+}
+
 // Release GPIO resources
 void gpio_cleanup(void)
 {
-	// Release all GPIO lines
-	if (config.pa_en_line) {
-		gpiod_line_release(config.pa_en_line);
-		config.pa_en_line = NULL;
+	if (config.boot0_line)
+	{
+		gpioSetValue(config.boot0, 0);
+		gpiod_line_request_release(config.boot0_line);
 	}
-	
-	if (config.boot0_line) {
-		gpiod_line_release(config.boot0_line);
-		config.boot0_line = NULL;
+	if (config.nrst_line)
+	{
+		gpioSetValue(config.nrst, 0);
+		gpiod_line_request_release(config.nrst_line);
 	}
-	
-	if (config.nrst_line) {
-		gpiod_line_release(config.nrst_line);
-		config.nrst_line = NULL;
-	}
-	
-	// Close the chip
-	if (config.gpio_chip) {
+	dbg_print(TERM_GREEN, "GPIO lines set to low...\n");
+	if (config.gpio_chip)
 		gpiod_chip_close(config.gpio_chip);
-		config.gpio_chip = NULL;
-	}
-	
 	dbg_print(TERM_GREEN, "GPIO resources released\n");
-}
-
-void gpio_init(const char *program_name)
-{
-	int ret;
-	
-	// Initialize to NULL for safety
-	config.gpio_chip = NULL;
-	config.pa_en_line = NULL;
-	config.boot0_line = NULL;
-	config.nrst_line = NULL;
-	
-	// Open the GPIO chip
-	config.gpio_chip = gpiod_chip_open_by_name("gpiochip0"); // Assuming gpiochip0, might need to be configurable
-	if (!config.gpio_chip) {
-		dbg_print(TERM_RED, "\nError opening GPIO chip\n");
-		// No need to call gpio_cleanup as nothing was allocated yet
-		exit(1);
-	}
-	
-	// Get the lines
-	config.pa_en_line = gpiod_chip_get_line(config.gpio_chip, config.pa_en);
-	if (!config.pa_en_line) {
-		dbg_print(TERM_RED, "\nError getting PA_EN line (GPIO%d)\n", config.pa_en);
-		gpio_cleanup();
-		exit(1);
-	}
-	
-	config.boot0_line = gpiod_chip_get_line(config.gpio_chip, config.boot0);
-	if (!config.boot0_line) {
-		dbg_print(TERM_RED, "\nError getting BOOT0 line (GPIO%d)\n", config.boot0);
-		gpio_cleanup();
-		exit(1);
-	}
-	
-	config.nrst_line = gpiod_chip_get_line(config.gpio_chip, config.nrst);
-	if (!config.nrst_line) {
-		dbg_print(TERM_RED, "\nError getting nRST line (GPIO%d)\n", config.nrst);
-		gpio_cleanup();
-		exit(1);
-	}
-	
-	// Request lines as outputs, initially low
-	ret = gpiod_line_request_output(config.pa_en_line, program_name, 0);
-	if (ret < 0) {
-		dbg_print(TERM_RED, "\nError requesting PA_EN line %d as output\n", config.pa_en);
-		gpio_cleanup();
-		exit(1);
-	}
-	
-	ret = gpiod_line_request_output(config.boot0_line, program_name, 0);
-	if (ret < 0) {
-		dbg_print(TERM_RED, "\nError requesting BOOT0 line %d as output\n", config.boot0);
-		gpio_cleanup();
-		exit(1);
-	}
-	
-	ret = gpiod_line_request_output(config.nrst_line, program_name, 0);
-	if (ret < 0) {
-		dbg_print(TERM_RED, "\nError requesting nRST line %d as output\n", config.nrst);
-		gpio_cleanup();
-		exit(1);
-	}
-	
-	// Lines are now requested and set to low
-	// The handles are stored in the config structure for efficient reuse
-}
-
-uint8_t gpio_set(uint16_t gpio, uint8_t state)
-{
-	struct gpiod_line *line = NULL;
-	int ret;
-	
-	// Determine which line to use based on the GPIO number
-	if (gpio == config.pa_en) {
-		line = config.pa_en_line;
-	} else if (gpio == config.boot0) {
-		line = config.boot0_line;
-	} else if (gpio == config.nrst) {
-		line = config.nrst_line;
-	}
-	
-	// Verify we have a valid line
-	if (!line) {
-		dbg_print(TERM_RED, "Error: Invalid GPIO number %d or GPIO not initialized\n", gpio);
-		return 1;
-	}
-	
-	// Set the value using the stored line handle
-	ret = gpiod_line_set_value(line, state ? 1 : 0);
-	// dbg_print(0, "Attempted to set GPIO line %d to %d, gpiod_line_set_value returned %d\n", gpio, state, ret);
-	if (ret < 0) {
-		dbg_print(TERM_RED, "Error setting GPIO line %d value to %d (errno: %d)\n", gpio, state, errno);
-		return 1;
-	}
-	
-	return 0;
 }
 
 //M17 stuff
@@ -1123,20 +1077,18 @@ int main(int argc, char* argv[])
 	if(reset)
 	{
 		dbg_print(0, "Device reset...");
-		uint8_t gpio_err=0;
-		gpio_init(argv[0]);
-		gpio_err|=gpio_set(config.boot0, 0); //all pins should be at logic low already, but better be safe than sorry
-		gpio_err|=gpio_set(config.pa_en, 0);
-		gpio_err|=gpio_set(config.nrst, 0);
+		if (gpio_init(argv[0]))
+			return EXIT_FAILURE;
+		if (gpioSetValue(config.boot0, 0)) //all pins should be at logic low already, but better be safe than sorry
+			return EXIT_FAILURE;
+		if(gpioSetValue(config.nrst, 0))
+			return EXIT_FAILURE;
 		usleep(250000U); //250ms
-		gpio_err|=gpio_set(config.nrst, 1);
-
-		if(gpio_err)
-			dbg_print(TERM_RED, " error\n");
-		else
-			dbg_print(TERM_GREEN, " OK\n");
+		if (gpioSetValue(config.nrst, 1))
+			return EXIT_FAILURE;
+		dbg_print(TERM_GREEN, " OK\n");
 		
-		return (int)gpio_err;
+		return EXIT_SUCCESS;
 	}
 
 	//check if the reflector's address looks valid
@@ -1188,14 +1140,15 @@ int main(int argc, char* argv[])
 
 	//------------------------------------gpio init------------------------------------
 	dbg_print(0, "GPIO init...");
-	uint8_t gpio_err=0;
-	gpio_init(argv[0]);
-	gpio_err|=gpio_set(config.nrst, 0); //both pins should be at logic low already, but better be safe than sorry
+	if (gpio_init(argv[0]))
+		return EXIT_FAILURE;
+	if (gpioSetValue(config.nrst, 0)) //both pins should be at logic low already, but better be safe than sorry
+		return EXIT_FAILURE;
 	usleep(250000U); //250ms
-	gpio_err|=gpio_set(config.nrst, 1);
+	if (gpioSetValue(config.nrst, 1))
+		return EXIT_FAILURE;
 	usleep(1000000U); //1s for device boot-up
-	if(gpio_err==0)
-		dbg_print(TERM_GREEN, " OK\n");
+	dbg_print(TERM_GREEN, " OK\n");
 
 	//-----------------------------------device part-----------------------------------
 	dbg_print(0, "UART init: %s at %d...", (char*)config.uart, config.uart_rate);
@@ -1749,7 +1702,6 @@ int main(int argc, char* argv[])
 					//stop RX, set PA_EN=1 and initialize TX
 					while (dev_stop_rx() != 0) usleep(40e3);
 					usleep(2e3);
-					gpio_set(config.pa_en, 1);
 					while (dev_start_tx() != 0) usleep(40e3);
 					usleep(10e3);
 
@@ -1818,9 +1770,6 @@ int main(int argc, char* argv[])
 						timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
 					dbg_print(TERM_GREEN, " Stream TX end\n");
 					usleep(8*40e3); //wait 320ms (8 M17 frames) - let the transmitter consume all the buffered samples
-					
-					//disable TX
-					gpio_set(config.pa_en, 0);
 
 					//restart RX
 					while (dev_stop_tx() != 0) usleep(40e3);
@@ -1887,7 +1836,7 @@ int main(int argc, char* argv[])
 				//stop RX, set PA_EN=1 and initialize TX
 				while (dev_stop_rx() != 0) usleep(40e3);
 				usleep(2e3);
-				gpio_set(config.pa_en, 1);
+
 				while (dev_start_tx() != 0) usleep(40e3);
 				usleep(10e3);
 				
@@ -1955,9 +1904,6 @@ int main(int argc, char* argv[])
 					timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
 				dbg_print(TERM_GREEN, " PKT TX end\n");
 				usleep(3*40e3); //wait 120ms (3 M17 frames)
-				
-				//disable TX
-				gpio_set(config.pa_en, 0);
 
 				//restart RX
 				while (dev_stop_tx() != 0) usleep(40e3);
@@ -1985,9 +1931,6 @@ int main(int argc, char* argv[])
 				timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
 			dbg_print(TERM_GREEN, " TX timeout\n");
 			//usleep(10*40e3); //wait 400ms (10 M17 frames)
-			
-			//disable TX
-			gpio_set(config.pa_en, 0);
 
 			//restart RX
 			while (dev_stop_tx() != 0) usleep(40e3);
