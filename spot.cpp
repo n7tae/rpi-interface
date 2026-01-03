@@ -157,7 +157,6 @@ void CCC1200::timeStamp()
 	struct timeval now;
 	gettimeofday(&now, nullptr);
 	struct tm* tm = ::localtime(&now.tv_sec);
-
 	printMsg(TERM_SKYBLUE, "%02d/%02d %02d:%02d:%02d.%03lld ", tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, now.tv_usec / 1000LL);
 }
 
@@ -880,7 +879,7 @@ void CCC1200::Run()
 	int8_t rx_bsb_sample = 0;
 	int8_t flt_buff[41];
 	int8_t raw_bsb_rx[960];
-	uint8_t rx_samp_buff[963] { 0 };
+	uint8_t rx_samp_buff[1024] { 0 };
 	uint8_t lsf_b[30];
 	uint8_t lich_parts = 0;
 	uint16_t fn;
@@ -947,22 +946,18 @@ void CCC1200::Run()
 			}
 			else
 			{
-				rx_samp_buff[rx_buff_cnt] = rx_bsb_sample;
-				rx_buff_cnt++;
+				rx_samp_buff[rx_buff_cnt++] = rx_bsb_sample;
 			}
 
-			if (uart_rx_sync && rx_buff_cnt==963)
+			if (uart_rx_sync && rx_buff_cnt>=963)
 			{
 				//printMsg(TERM_YELLOW, "Baseband packet received\n");
 				memcpy(raw_bsb_rx, &rx_samp_buff[3], sizeof(raw_bsb_rx));
 				memset(rx_samp_buff, 0, sizeof(rx_samp_buff));
 				uart_rx_data_valid = true;
-				uart_rx_sync = 0;
+				uart_rx_sync = false;
 				rx_buff_cnt = 0;
 			}
-
-			if (rx_buff_cnt > 863)
-				printMsg(TERM_YELLOW, "Input buffer overflow\n");
 		}
 
 		if (uart_rx_data_valid)
