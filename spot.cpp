@@ -1288,7 +1288,8 @@ void CCC1200::Run()
 		//receive a packet - blocking
 		if (FD_ISSET(sockt, &rfds))
 		{
-			rx_len = recvfrom(sockt, rx_buff, MAX_UDP_LEN, 0, (struct sockaddr*)&saddr, (socklen_t*)&saddr_size);
+			auto bsize = sizeof(rx_buff);
+			rx_len = recvfrom(sockt, rx_buff, bsize, 0, (struct sockaddr*)&saddr, (socklen_t*)&saddr_size);
 
 			//debug
 			//printMsg(0, "Size:%d\nPayload:%s\n", rx_len, rx_buff);
