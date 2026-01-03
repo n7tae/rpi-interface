@@ -892,6 +892,8 @@ void CCC1200::Run()
 	uint16_t last_fn = 0xffffu;
 	float f_flt_buff[2042];
 	const int8_t lsf_sync_ext[16] { +3, -3, +3, -3, +3, -3, +3, -3, +3, +3, +3, +3, -3, -3, +3, -3 };
+	const int8_t eot_symbols[8]    {+3, +3, +3, +3, +3, +3, -3, +3};
+
 
 	lsf_t lsf;
 
@@ -988,13 +990,16 @@ void CCC1200::Run()
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[i*5];
 
-				float dist_lsf=eucl_norm(&symbols[0], lsf_sync_ext, 16); //check against extended LSF syncword (8 symbols, alternating -3/+3)
-				float dist_pkt=eucl_norm(&symbols[0], pkt_sync_symbols, 8);
-				float dist_str_a=eucl_norm(&symbols[8], str_sync_symbols, 8);
+				float dist_lsf =    eucl_norm(&symbols[0], lsf_sync_ext, 16);
+				float dist_pma = sq_eucl_norm(&symbols[8], pkt_sync_symbols, 8);
+				float dist_sma = sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[960+i*5];
-				float dist_str_b=eucl_norm(&symbols[8], str_sync_symbols, 8);
-				float dist_str=sqrtf(dist_str_a*dist_str_a+dist_str_b*dist_str_b);
+				float dist_eot = sq_eucl_norm(&symbols[8], eot_symbols,      8);
+				float dist_pmb = sq_eucl_norm(&symbols[8], pkt_sync_symbols, 8);
+				float dist_smb = sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
+				float dist_pkt = sqrtf(dist_pma + ((dist_pmb < dist_eot) ? dist_pmb : dist_eot));
+				float dist_str = sqrtf(dist_sma + ((dist_smb < dist_eot) ? dist_smb : dist_eot));
 
 				//fwrite(&dist_str, 4, 1, fp);
 
