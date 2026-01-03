@@ -46,6 +46,7 @@
 // 40.0e3 is F_TCXO in kHz
 // 129 is `CFM_RX_DATA_OUT` register value at max. F_DEV (130 is 1 off but offers a better symbol map)
 // datasheet might have this wrong (it says 64)
+
 #define TX_SYMBOL_SCALING_COEFF	(0.8f/((40.0e3f/2097152)*0xAD)*64.0f)
 // 0xAD is `DEVIATION_M`, 2097152=2^21
 // +0.8kHz is the deviation for symbol +1
@@ -132,7 +133,7 @@ time_t last_refl_ping;
 //debug printf
 void CCC1200::printMsg(const char* color_code, const char* fmt, ...)
 {
-	char str[1000]; //1k chars is probably an overkill, but - oh well :)
+	char str[1000];	// plenty of room
 	va_list ap;
 
 	va_start(ap, fmt);
@@ -157,7 +158,7 @@ void CCC1200::timeStamp()
 	struct timeval now;
 	gettimeofday(&now, nullptr);
 	struct tm* tm = ::localtime(&now.tv_sec);
-	printMsg(TERM_SKYBLUE, "%02d/%02d %02d:%02d:%02d.%03lld ", tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, now.tv_usec / 1000LL);
+	printMsg(TERM_SKYBLUE, "[%02d/%02d %02d:%02d:%02d.%03lld] ", tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, now.tv_usec / 1000LL);
 }
 
 uint32_t CCC1200::getMS(void)
@@ -917,7 +918,7 @@ void CCC1200::Run()
 		auto sval = select(maxfd+1, &rfds, nullptr, nullptr, nullptr);
 		if (sval < 0)
 		{
-			printMsg(TERM_RED, "select error: %s\n", strerror(errno));
+			printMsg(TERM_RED, "select() error: %s\n", strerror(errno));
 			keep_running = false;
 			break;
 		}
@@ -940,7 +941,7 @@ void CCC1200::Run()
 
 				if (rx_samp_buff[0]==CMD_RX_DATA && rx_samp_buff[1]==0xC3 && rx_samp_buff[2]==0x03)
 				{
-					uart_rx_sync = 1;
+					uart_rx_sync = true;
 					rx_buff_cnt = 3;
 				}
 			}
