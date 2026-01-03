@@ -467,7 +467,7 @@ bool CCC1200::pingDev()
 
 	uint32_t dev_err;
 	memcpy((uint8_t*)&dev_err, &resp[3], sizeof(uint32_t));
-    printMsg(TERM_YELLOW, "PONG error code: 0x%04X\n", dev_err);
+    printMsg(TERM_YELLOW, "%02x %02x %02x PONG error code: 0x%04X\n", resp[0], resp[1], resp[2], dev_err);
     return true;
 }
 
