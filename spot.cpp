@@ -284,7 +284,7 @@ static bool load_config(struct config_t *cfg)
 	cfg->afc = true;
 	cfg->nrst = 21;
 	cfg->boot0 = 20;
-	return true;
+	return false;
 }
 
 struct gpiod_line_request *CCC1200::gpioLineRequest(unsigned offset, int value, const char *consumer)
