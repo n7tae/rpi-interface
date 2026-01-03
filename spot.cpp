@@ -458,7 +458,7 @@ bool CCC1200::pingDev()
 
     uart_lock = false;
 
-	const uint16_t good[7] { cid, 7, 0, 0, 0, 0, 0 };
+	const uint8_t good[7] { cid, 7, 0, 0, 0, 0, 0 };
     if (0 == memcmp(resp, good, 7))
 	{
 		printMsg(TERM_GREEN, "PONG OK\n"); //OK
@@ -814,7 +814,7 @@ bool CCC1200::Start()
 	//PING-PONG test
 	printMsg(0, "Radio board's reply to PING... ");
 	if (pingDev())
-		return false;
+		return true;
 
 	//config the device
 	if (setRxFreq(config.rx_freq) or
