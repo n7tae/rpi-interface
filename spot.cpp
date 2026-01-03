@@ -649,7 +649,7 @@ bool CCC1200::txrxControl(uint8_t cid, uint8_t onoff, const char *what)
 	const uint8_t good[3] { cid, 4, 0 };
 	if (memcmp(resp, good, 3) or (ERR_OK != resp[3] and ERR_NOP != resp[3]))
 	{
-		printMsg(TERM_RED, "Doing %s, cmd returned %02x %02x %02x %02x", what, resp[0], resp[1], resp[2], resp[3]);
+		printMsg(TERM_RED, "Doing %s, cmd returned %02x %02x %02x %02x\n", what, resp[0], resp[1], resp[2], resp[3]);
 		return true;
 	}
 
