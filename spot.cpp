@@ -687,12 +687,6 @@ void sigint_handler(int val)
 	// Clean up GPIO resources
 	keep_running = false;
 
-	//close log file if necessary
-	if(logfile)
-	{
-		fclose(logfile);
-	}
-
 	printf("Exiting\n");
 }
 
@@ -1601,17 +1595,6 @@ void CCC1200::Run()
 			keep_running = false;
 			//for now, just cry about it and quit
 			printMsg(TERM_RED, "Lost connection with the reflector\nExiting");
-
-			//cleanup gpios
-			gpioCleanup();
-
-			//close log file if necessary
-			if(logfile)
-			{
-				fclose(logfile);
-			}
-
-			exit(EXIT_FAILURE);
 		}
 	}
 	printMsg(TERM_GREEN, "run loop terminated\n");
