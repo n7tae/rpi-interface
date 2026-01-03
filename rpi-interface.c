@@ -1742,8 +1742,8 @@ int main(int argc, char* argv[])
 
 					//generate META field
 					//remove trailing spaces and suffixes
-					uint8_t trimmed_src[12], enc_trimmed_src[6];
-					for(uint8_t i=0; i<12; i++)
+					uint8_t trimmed_src[10], enc_trimmed_src[6];
+					for(uint8_t i=0; i<10; i++)
 					{
 						if(src_call[i]!=' ')
 							trimmed_src[i]=src_call[i];
