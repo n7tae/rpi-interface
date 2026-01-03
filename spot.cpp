@@ -36,8 +36,6 @@
 
 #include "term.h" //colored terminal font
 
-#define DEBUG_HALT				while(1)
-
 #define MAX_UDP_LEN				65535
 
 #define RX_SYMBOL_SCALING_COEFF	(1.0f/(0.8f/(40.0e3f/2097152*0xAD)*130.0f))
@@ -65,7 +63,7 @@ struct sockaddr_in serv_addr;
 uint32_t saddr_size=sizeof(saddr);
 
 uint8_t tx_buff[512]={0};
-uint8_t rx_buff[65536]={0};
+uint8_t rx_buff[1000]={0};
 int tx_len=0, rx_len=0;
 
 //config stuff
@@ -150,6 +148,7 @@ void CCC1200::printMsg(const char* color_code, const char* fmt, ...)
 	{
 		fputs(str, stdout);
 	}
+	fflush(stdout);
 }
 
 void CCC1200::timeStamp()
