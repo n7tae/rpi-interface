@@ -394,7 +394,7 @@ void CCC1200::gpioCleanup()
 		gpioSetValue(config.nrst, 0);
 		gpiod_line_request_release(nrst_line);
 	}
-	printMsg(TERM_GREEN, "GPIO lines set to low...\n");
+	printMsg(TERM_GREEN, "GPIO lines set to low\n");
 	if (gpio_chip)
 		gpiod_chip_close(gpio_chip);
 	printMsg(TERM_GREEN, "GPIO resources released\n");
@@ -661,21 +661,29 @@ bool CCC1200::txrxControl(uint8_t cid, uint8_t onoff, const char *what)
 
 bool CCC1200::startRx(void)
 {
+	timeStamp();
+	printMsg(TERM_YELLOW, "Starting Rx");
 	return txrxControl(CMD_RX_START, 1, "startRx");
 }
 
 bool CCC1200::stopRx(void)
 {
+	timeStamp();
+	printMsg(TERM_YELLOW, "Stopping Rx");
 	return txrxControl(CMD_RX_START, 0, "stopRx");
 }
 
 bool CCC1200::startTx(void)
 {
+	timeStamp();
+	printMsg(TERM_YELLOW, "Starting Tx");
 	return txrxControl(CMD_TX_START, 1, "startTx");
 }
 
 bool CCC1200::stopTx(void)
 {
+	timeStamp();
+	printMsg(TERM_YELLOW, "Stopping Tx");
 	return txrxControl(CMD_TX_START, 0, "stopTx");
 }
 
@@ -687,10 +695,7 @@ void sigint_handler(int val)
 	memcpy(&tx_buff[4], config.enc_node, sizeof(config.enc_node));
 	refl_send(tx_buff, 4+6); //DISC
 
-	// Clean up GPIO resources
 	keep_running = false;
-
-	printf("Exiting\n");
 }
 
 //new, polyphase filter implementation
