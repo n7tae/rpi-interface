@@ -19,6 +19,7 @@
 #include <netinet/tcp.h>
 #include <netinet/ip.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <arpa/inet.h>
 
 #include <fcntl.h> 
@@ -153,9 +154,11 @@ void CCC1200::printMsg(const char* color_code, const char* fmt, ...)
 
 void CCC1200::timeStamp()
 {
-	const auto rawtime = time(nullptr);
-	const auto timeinfo = localtime(&rawtime);
-	printMsg(TERM_SKYBLUE, "[%02d:%02d:%02d] ", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+	struct timeval now;
+	gettimeofday(&now, nullptr);
+	struct tm* tm = ::localtime(&now.tv_sec);
+
+	printMsg(TERM_SKYBLUE, "%02d/%02d %02d:%02d:%02d.%03lld ", tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, now.tv_usec / 1000LL);
 }
 
 uint32_t CCC1200::getMS(void)
@@ -225,15 +228,15 @@ bool CCC1200::setAttributes(unsigned speed, int parity)
 	struct termios tty;
 	if(tcgetattr(fd, &tty))
 	{
-		printMsg(TERM_YELLOW, " Error from tcgetattr(): %s\n", strerror(errno));
+		printMsg(TERM_RED, "tcgetattr() error: %s\n", strerror(errno));
 		return true;
  	}
 
-	const auto baud = getBaud(speed);
+	auto baud = getBaud(speed);
 	if (B0 == baud)
 	{
-		printMsg(TERM_RED, "%u is not a valid baud rate\n");
-		return true;
+		printMsg(TERM_YELLOW, "%u is not a valid baud rate, trying 460800 ", speed);
+		baud = B460800;
 	}
 	cfsetospeed(&tty, baud);
 	cfsetispeed(&tty, baud);
@@ -259,7 +262,7 @@ bool CCC1200::setAttributes(unsigned speed, int parity)
 
 	if(tcsetattr(fd, TCSANOW, &tty))
 	{		
-		printMsg(TERM_RED, " Error from tcsetattr(): %s\n", strerror(errno));
+		printMsg(TERM_RED, " tcsetattr() error: %s\n", strerror(errno));
 		return true; 
 	}
 	
@@ -416,10 +419,10 @@ bool CCC1200::readDev(void *vbuf, int size)
 	{
 		int r = read(fd, buf + rd, size - rd);
 		if (r < 0) {
-			printMsg(TERM_RED, "read() returned error: %s", strerror(errno));
+			printMsg(TERM_RED, "read() %s returned error: %s", config.uart, strerror(errno));
 			return true;
 		} else if (r == 0) {
-			printMsg(TERM_RED, "read() returned zero bytes");
+			printMsg(TERM_RED, "read() %s returned zero bytes\n", config.uart);
 			return true;
 		}
 		rd += r;
@@ -431,9 +434,9 @@ void CCC1200::writeDev(void *buf, int size, const char *where)
 {
 	ssize_t n = write(fd, buf, size);
 	if (n < 0) {
-		printMsg(TERM_RED, "In %s, write() error: %s", where, strerror(errno));
+		printMsg(TERM_YELLOW, "In %s, write() error: %s\n", where, strerror(errno));
 	} else if (n != size) {
-		printMsg(TERM_RED, "write() only wrote %d of %d in %s", n, size, where);
+		printMsg(TERM_YELLOW, "write() only wrote %d of %d in %s\n", n, size, where);
 	}
 	return;
 }
@@ -499,7 +502,7 @@ bool CCC1200::setRxFreq(uint32_t freq)
         return false;
     }
 
-    printMsg(TERM_YELLOW, "Error %d setting RX frequency: %u Hz\n", resp[3], freq); //error
+    printMsg(TERM_RED, "Error %d setting RX frequency: %u Hz\n", resp[3], freq); //error
     return true;
 }
 
@@ -531,7 +534,7 @@ bool CCC1200::setTxFreq(uint32_t freq)
         return false;
     }
 
-    printMsg(TERM_YELLOW, "Error %d setting TX frequency: %u Hz\n", resp[3], freq); //error
+    printMsg(TERM_RED, "Error %d setting TX frequency: %u Hz\n", resp[3], freq); //error
     return true;
 }
 
@@ -562,7 +565,7 @@ bool CCC1200::setFreqCorr(int16_t corr)
         return false;
     }
 
-    printMsg(TERM_YELLOW, "Error %d setting frequency correction: %d\n", resp[3], corr); //error
+    printMsg(TERM_RED, "Error %d setting frequency correction: %d\n", resp[3], corr); //error
     return true;
 }
 
@@ -593,7 +596,7 @@ bool CCC1200::setAfc(bool en)
         return false;
     }
 
-    printMsg(TERM_YELLOW, "Error setting AFC\n"); //error
+    printMsg(TERM_RED, "Error setting AFC\n"); //error
     return true;
 }
 
@@ -624,7 +627,7 @@ bool CCC1200::setTxPower(float power) //powr in dBm
         return false;
     }
 
-    printMsg(TERM_YELLOW, "Error %d setting TX power: %2.2f dBm\n", resp[3], power); //error
+    printMsg(TERM_RED, "Error %d setting TX power: %2.2f dBm\n", resp[3], power); //error
     return true;
 }
 
@@ -771,7 +774,7 @@ bool CCC1200::Start()
 		else
 		{
 			printMsg(TERM_RED, "Cannot access %s\nExiting\n", config.log_path);
-			return 1;
+			return true;
 		}
 	}
 	else
@@ -781,7 +784,7 @@ bool CCC1200::Start()
 	}
 
 	//------------------------------------gpio init------------------------------------
-	printMsg(0, "GPIO init...");
+	printMsg(0, "GPIO init: ");
 	if (gpioInit("Spot"))
 		return true;
 	if (gpioSetValue(config.nrst, 0)) //both pins should be at logic low already, but better be safe than sorry
@@ -793,11 +796,11 @@ bool CCC1200::Start()
 	printMsg(TERM_GREEN, " OK\n");
 
 	//-----------------------------------device part-----------------------------------
-	printMsg(0, "UART init: %s at %d...", (char*)config.uart, config.uart_rate);
-	fd=open((char*)config.uart, O_RDWR | O_NOCTTY | O_SYNC);
+	printMsg(0, "UART init: %s at %d baud: ", (char*)config.uart, config.uart_rate);
+	fd = open((char*)config.uart, O_RDWR | O_NOCTTY | O_SYNC);
 	if(fd < 0)
 	{
-		printMsg(TERM_RED, " error\nExiting\n");
+		printMsg(TERM_RED, "open(%s) error: %s\n", config.uart, strerror(errno));
 		return true;
 	}
 	
@@ -821,7 +824,7 @@ bool CCC1200::Start()
 	}
 
 	//-----------------------------------internet part-----------------------------------
-	printMsg(0, "Connecting to %s:%d (%s) module %c as \"%s\"", config.refl_addr, config.refl_port, config.reflector, config.module, config.node);
+	printMsg(0, "Connecting to %s:%d (%s) module %c as \"%s\": ", config.refl_addr, config.refl_port, config.reflector, config.module, config.node);
 
 	//server
 	serv_addr.sin_family = AF_INET;
@@ -830,9 +833,9 @@ bool CCC1200::Start()
 
 	//Create a socket
 	sockt = socket(AF_INET, SOCK_DGRAM, 0);
-	if(sockt<0)
+	if(sockt < 0)
 	{
-		printMsg(TERM_RED, "\nSocket error\nExiting\n");
+		printMsg(TERM_RED, "socket() error: %s\n", strerror(errno));
 		return true;
 	}
 	memset(&daddr, 0, sizeof(daddr));
@@ -864,7 +867,7 @@ void CCC1200::Stop()
 		fclose(logfile);
 	if (sockt)
 		close(sockt);
-	printMsg(TERM_GREEN, "All resources closed");
+	printMsg(TERM_GREEN, "All resources closed\n");
 }
 
 void CCC1200::Run()
@@ -958,8 +961,8 @@ void CCC1200::Run()
 				rx_buff_cnt = 0;
 			}
 
-			if (rx_buff_cnt > 1024)
-				printMsg(TERM_RED, "Input buffer overflow\n");
+			if (rx_buff_cnt > 863)
+				printMsg(TERM_YELLOW, "Input buffer overflow\n");
 		}
 
 		if (uart_rx_data_valid)
@@ -1043,7 +1046,7 @@ void CCC1200::Run()
 						last_fn=0xFFFFU;
 
 						printMsg(TERM_GREEN, " CRC OK ");
-						printMsg(TERM_YELLOW, "| DST: %-9s | SRC: %-9s | TYPE: %04X (CAN=%d) | MER: %-3.1f%%\n",
+						printMsg(TERM_YELLOW, "| DST: %s | SRC: %-9s | TYPE: %04X (CAN=%d) | MER: %-3.1f%%\n",
 							call_dst, call_src, type, can, (float)e/0xFFFFU/SYM_PER_PLD/2.0f*100.0f);
 
 						if(type&1) //if stream
@@ -1466,7 +1469,7 @@ void CCC1200::Run()
 				else
 				{
 					printMsg(TERM_DEFAULT, " ├ "); printMsg(TERM_YELLOW, "TYPE: "); printMsg(TERM_DEFAULT, "SMS\n");
-					printMsg(TERM_DEFAULT, " └ "); printMsg(TERM_YELLOW, "MSG: "); printMsg(TERM_DEFAULT, "%s\n", &rx_buff[4+240/8+1]);
+					printMsg(TERM_DEFAULT, " └ "); printMsg(TERM_YELLOW, "MSG: ");  printMsg(TERM_DEFAULT, "%s\n", &rx_buff[4+240/8+1]);
 				}
 
 				//TODO: handle TX here
@@ -1478,9 +1481,7 @@ void CCC1200::Run()
 				{
 					const auto rawtime = time(nullptr);
 					const auto timeinfo=localtime(&rawtime);
-					fprintf(logfile, "\"%02d:%02d:%02d\" \"%s\" \"%s\" \"Internet\" \"--\" \"--\"\n",
-						timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec,
-						call_src, call_dst);
+					fprintf(logfile, "\"%02d:%02d:%02d\" \"%s\" \"%s\" \"Internet\" \"--\" \"--\"\n", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec, call_src, call_dst);
 				}
 				
 				timeStamp();
