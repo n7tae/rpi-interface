@@ -662,28 +662,28 @@ bool CCC1200::txrxControl(uint8_t cid, uint8_t onoff, const char *what)
 bool CCC1200::startRx(void)
 {
 	timeStamp();
-	printMsg(TERM_YELLOW, "Starting Rx");
+	printMsg(TERM_YELLOW, "Starting Rx\n");
 	return txrxControl(CMD_RX_START, 1, "startRx");
 }
 
 bool CCC1200::stopRx(void)
 {
 	timeStamp();
-	printMsg(TERM_YELLOW, "Stopping Rx");
+	printMsg(TERM_YELLOW, "Stopping Rx\n");
 	return txrxControl(CMD_RX_START, 0, "stopRx");
 }
 
 bool CCC1200::startTx(void)
 {
 	timeStamp();
-	printMsg(TERM_YELLOW, "Starting Tx");
+	printMsg(TERM_YELLOW, "Starting Tx\n");
 	return txrxControl(CMD_TX_START, 1, "startTx");
 }
 
 bool CCC1200::stopTx(void)
 {
 	timeStamp();
-	printMsg(TERM_YELLOW, "Stopping Tx");
+	printMsg(TERM_YELLOW, "Stopping Tx\n");
 	return txrxControl(CMD_TX_START, 0, "stopTx");
 }
 
