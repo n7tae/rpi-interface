@@ -687,10 +687,8 @@ bool CCC1200::stopTx(void)
 	return txrxControl(CMD_TX_START, 0, "stopTx");
 }
 
-void sigint_handler(int val)
+void sigint_handler(int)
 {
-	(void)val; //get rid of unused variable warning
-	printf("SIGINT caught, disconnecting\n");
 	sprintf((char*)tx_buff, "DISCxxxxxx"); //that "xxxxxx" is just a placeholder
 	memcpy(&tx_buff[4], config.enc_node, sizeof(config.enc_node));
 	refl_send(tx_buff, 4+6); //DISC
@@ -923,7 +921,8 @@ void CCC1200::Run()
 		auto sval = select(maxfd+1, &rfds, nullptr, nullptr, nullptr);
 		if (sval < 0)
 		{
-			printMsg(TERM_RED, "select() error: %s\n", strerror(errno));
+			if (EINTR != errno)
+				printMsg(TERM_RED, "select() error: %s\n", strerror(errno));
 			keep_running = false;
 			break;
 		}
