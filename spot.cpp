@@ -1292,7 +1292,7 @@ void CCC1200::Run()
 						got_lsf = false;
 					}
 				}
-				printf("%.2f %.2f %.2f\n", lmin, pmin, smin);
+				if (lmin < 40.f or smin < 40.f) printf("%3d %.2f %.2f %.2f\n", i, lmin, pmin, smin);
 			}
 
 			//all data has been used
