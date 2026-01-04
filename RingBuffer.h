@@ -29,7 +29,7 @@ public:
     }
 
     // Get an element from the buffer
-    const T operator[](unsigned index) const
+    T operator[](unsigned index) const
 	{
 		return buffer[(index + position) % capacity];
 	}
