@@ -971,6 +971,7 @@ void CCC1200::Run()
 
 		if (uart_rx_data_valid)
 		{
+			float lmin = 150, smin = 150;
 			for (uint16_t ii=0; ii<960; ii++)
 			{
 				//push the next sample into the buffer
@@ -999,6 +1000,8 @@ void CCC1200::Run()
 				float sed_smb = sed(symbols, str_sync_symbols, 8);
 				float sed_pkt = sed_pma + (sed_pmb < sed_eot) ? sed_pmb : sed_eot;
 				float sed_str = sed_sma + (sed_smb < sed_eot) ? sed_smb : sed_eot;
+				if (sed_lsf < lmin) lmin = sed_lsf;
+				if (sed_str < lmin) lmin = sed_str;
 
 				//fwrite(&dist_str, 4, 1, fp);
 				printMsg(TERM_YELLOW, "%.3u %6.2f %6.2f %6.2f\n", ii, sed_lsf, sed_pkt, sed_str);
@@ -1289,7 +1292,7 @@ void CCC1200::Run()
 			}
 			//all data has been used
 			uart_rx_data_valid = false;
-			keep_running = false;
+			printMsg(TERM_YELLOW, "%6.2f %6.2f\n", lmin, smin);
 		}
 
 		//receive a packet - blocking
