@@ -969,6 +969,9 @@ void CCC1200::Run()
 
 		if (uart_rx_data_valid)
 		{
+			float lmin { 1e10 };
+			float pmin { 1e10 };
+			float smin { 1e10 };
 			for (uint16_t i=0; i<960; i++)
 			{
 				//push buffer TODO: please optimize this. eyes hurt
@@ -1002,6 +1005,9 @@ void CCC1200::Run()
 				float sed_str = sed_sma + (sed_smb < sed_eot) ? sed_smb : sed_eot;
 
 				//fwrite(&dist_str, 4, 1, fp);
+				if (sed_lsf < lmin) lmin = sed_lsf;
+				if (sed_pkt < pmin) pmin = sed_pkt;
+				if (sed_str < smin) smin = sed_str;
 
 				//LSF received at idle state
 				if(sed_lsf<=20.25f && rx_state==RX_IDLE)
@@ -1286,6 +1292,7 @@ void CCC1200::Run()
 						got_lsf = false;
 					}
 				}
+				printf("%.2f %.2f %.2f\n", lmin, pmin, smin);
 			}
 
 			//all data has been used
