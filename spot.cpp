@@ -991,13 +991,13 @@ void CCC1200::Run()
 					symbols[i]=f_flt_buff[i*5];
 
 				float dist_lsf =    eucl_norm(&symbols[0], lsf_sync_ext, 16);
-				float dist_pma = sq_eucl_norm(&symbols[0], pkt_sync_symbols, 8);
-				float dist_sma = sq_eucl_norm(&symbols[0], str_sync_symbols, 8);
+				float dist_pma = sq_eucl_norm(&symbols[8], pkt_sync_symbols, 8);
+				float dist_sma = sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[960+i*5];
-				float dist_eot = sq_eucl_norm(&symbols[0], eot_symbols,      8);
-				float dist_pmb = sq_eucl_norm(&symbols[0], pkt_sync_symbols, 8);
-				float dist_smb = sq_eucl_norm(&symbols[0], str_sync_symbols, 8);
+				float dist_eot = sq_eucl_norm(&symbols[8], eot_symbols,      8);
+				float dist_pmb = sq_eucl_norm(&symbols[8], pkt_sync_symbols, 8);
+				float dist_smb = sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
 				float dist_pkt = sqrtf(dist_pma + ((dist_pmb < dist_eot) ? dist_pmb : dist_eot));
 				float dist_str = sqrtf(dist_sma + ((dist_smb < dist_eot) ? dist_smb : dist_eot));
 
