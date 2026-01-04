@@ -916,6 +916,8 @@ void CCC1200::Run()
 	fd_set rfds;
 	int maxfd = (fd > sockt) ? fd : sockt;
 
+	float lmin = 144, pmin = 72, smin = 72;
+
 	while(keep_running)
 	{
 		FD_ZERO(&rfds);
@@ -969,8 +971,6 @@ void CCC1200::Run()
 			}
 		}
 
-		float lmin = 144, smin = 72;
-
 		if (uart_rx_data_valid)
 		{
 			for (uint16_t ii=0; ii<960; ii++)
@@ -1003,11 +1003,15 @@ void CCC1200::Run()
 				float sed_str = sed_sma + (sed_smb < sed_eot) ? sed_smb : sed_eot;
 				if (sed_lsf < lmin) {
 					lmin = sed_lsf;
-					printMsg(0, "lmin=%f\n", lmin);
+					printMsg(0, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
 				}
 				if (sed_str < smin) {
 					smin = sed_str;
-					printMsg(0, "smin=%.2f\n", smin);
+					printMsg(0, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
+				}
+				if (sed_pkt < pmin) {
+					pmin = sed_pkt;
+					printMsg(0, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
 				}
 
 				//printMsg(TERM_YELLOW, "%.3u %6.2f %6.2f %6.2f\n", ii, sed_lsf, sed_pkt, sed_str);
