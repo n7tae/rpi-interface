@@ -1003,8 +1003,7 @@ void CCC1200::Run()
 				if (sed_lsf < lmin) lmin = sed_lsf;
 				if (sed_str < lmin) lmin = sed_str;
 
-				//fwrite(&dist_str, 4, 1, fp);
-				printMsg(TERM_YELLOW, "%.3u %6.2f %6.2f %6.2f\n", ii, sed_lsf, sed_pkt, sed_str);
+				//printMsg(TERM_YELLOW, "%.3u %6.2f %6.2f %6.2f\n", ii, sed_lsf, sed_pkt, sed_str);
 
 				//LSF received at idle state
 				if(sed_lsf<=20.25f && rx_state==RX_IDLE)
