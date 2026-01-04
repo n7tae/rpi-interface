@@ -1098,13 +1098,13 @@ void CCC1200::Run()
 						for(uint8_t j=0; j<16; j++)
 							symbols[j]=f_flt_buff[j*5+i];
 						
-						float tmp_a=eucl_norm(&symbols[8], str_sync_symbols, 8);
+						float tmp_a=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
 						for(uint8_t j=0; j<16; j++)
 							symbols[j]=f_flt_buff[960+j*5+i];
-						
-						float tmp_b=eucl_norm(&symbols[8], str_sync_symbols, 8);
+						float tmp_b=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
+						float tmp_c=sq_eucl_norm(&symbols[8], eot_symbols, 8);
 
-						float d=sqrtf(tmp_a*tmp_a+tmp_b*tmp_b);
+						float d=sqrtf(tmp_a + ((tmp_b < tmp_c) ? tmp_b : tmp_c));
 
 						if(d<dist_str)
 						{
