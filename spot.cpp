@@ -28,6 +28,7 @@
 #include <signal.h>
 
 #include "CC1200.h"
+#include "RingBuffer.h"
 
 //spot commands
 #include "interface_cmds.h"
@@ -873,6 +874,7 @@ void CCC1200::Stop()
 	printMsg(TERM_GREEN, "All resources closed\n");
 }
 
+#define FLOATBUFSIZE 2042
 void CCC1200::Run()
 {
 	//UART comms
@@ -881,7 +883,6 @@ void CCC1200::Run()
 	bool got_lsf = false;
 	bool first_frame = true;
 	int8_t rx_bsb_sample = 0;
-	int8_t flt_buff[41];
 	int8_t raw_bsb_rx[960];
 	uint8_t rx_samp_buff[1024] { 0 };
 	uint8_t lsf_b[30];
@@ -890,7 +891,8 @@ void CCC1200::Run()
 	uint16_t sample_cnt = 0;
 	uint16_t rx_buff_cnt = 0;
 	uint16_t last_fn = 0xffffu;
-	float f_flt_buff[2042];
+	RingBuffer<int8_t, 41> flt_buff;
+	RingBuffer<float, 8*5+2*(8*5+4800/25*5)+2> f_flt_buff;
 	const int8_t lsf_sync_ext[16] { +3, -3, +3, -3, +3, -3, +3, -3, +3, +3, +3, +3, -3, -3, +3, -3 };
 	const int8_t eot_symbols[8]   { +3, +3, +3, +3, +3, +3, -3, +3 };
 
@@ -972,21 +974,18 @@ void CCC1200::Run()
 			float lmin { 1e10 };
 			float pmin { 1e10 };
 			float smin { 1e10 };
-			for (uint16_t i=0; i<960; i++)
+			for (uint16_t ii=0; ii<960; ii++)
 			{
-				//push buffer TODO: please optimize this. eyes hurt
-				for(uint8_t i=0; i<sizeof(flt_buff)-1; i++)
-					flt_buff[i] = flt_buff[i+1];
-				flt_buff[sizeof(flt_buff)-1] = raw_bsb_rx[i];
+				//push the next sample into the buffer
+				flt_buff.Push(raw_bsb_rx[ii]);
 
-				f_sample=0.0f;
-				for(uint8_t i=0; i<sizeof(flt_buff); i++)
-					f_sample+=rrc_taps_5[i]*(float)flt_buff[i];
-				f_sample*=RX_SYMBOL_SCALING_COEFF; //symbol map (works for CC1200 only)
+				// filter the buffer to get the new sample
+				f_sample = 0.0f;
+				for(uint8_t i=0; i<flt_buff.Size(); i++)
+					f_sample += rrc_taps_5[i] * float(flt_buff[i]);
 
-				for(uint16_t i=0; i<sizeof(f_flt_buff)/sizeof(float)-1; i++)
-					f_flt_buff[i]=f_flt_buff[i+1];
-				f_flt_buff[sizeof(f_flt_buff)/sizeof(float)-1]=f_sample;
+				// push the sample on into the float buffer
+				f_flt_buff.Push(f_sample*RX_SYMBOL_SCALING_COEFF);
 
 				//L2 norm check against syncword
 				float symbols[16];
@@ -1292,7 +1291,7 @@ void CCC1200::Run()
 						got_lsf = false;
 					}
 				}
-				if (lmin < 40.f or smin < 40.f) printf("%3d %.2f %.2f %.2f\n", i, lmin, pmin, smin);
+				if (lmin < 40.f or smin < 40.f) printf("%3d %.2f %.2f %.2f\n", ii, lmin, pmin, smin);
 			}
 
 			//all data has been used
@@ -1629,13 +1628,13 @@ void CCC1200::Run()
  */
 float CCC1200::sed(const float *v1, const int8_t *v2, const unsigned n) const
 {
-	float d { 0.0f };
+	float r = 0.0f;
 	for (unsigned i=0; i<n; i++)
 	{
 		auto x = v1[1] - float(v2[i]);
-		d += x * x;
+		r += x * x;
 	}
-	return d;
+	return r;
 }
 
 
