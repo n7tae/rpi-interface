@@ -55,6 +55,7 @@ private:
 	bool startRx(void);
 	bool stopTx(void);
 	bool stopRx(void);
+	float sed(const float *v1, const int8_t *v2, const unsigned len) const;
 	void filterSymbols(int8_t* __restrict out, const int8_t* __restrict in, const float* __restrict flt, uint8_t phase_inv);
 
 	int fd = -1; // the handle to the CC1200

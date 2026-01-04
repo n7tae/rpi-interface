@@ -892,7 +892,7 @@ void CCC1200::Run()
 	uint16_t last_fn = 0xffffu;
 	float f_flt_buff[2042];
 	const int8_t lsf_sync_ext[16] { +3, -3, +3, -3, +3, -3, +3, -3, +3, +3, +3, +3, -3, -3, +3, -3 };
-	const int8_t eot_symbols[8]    {+3, +3, +3, +3, +3, +3, -3, +3};
+	const int8_t eot_symbols[8]   { +3, +3, +3, +3, +3, +3, -3, +3 };
 
 
 	lsf_t lsf;
@@ -990,35 +990,35 @@ void CCC1200::Run()
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[i*5];
 
-				float dist_lsf =    eucl_norm(&symbols[0], lsf_sync_ext, 16);
-				float dist_pma = sq_eucl_norm(&symbols[8], pkt_sync_symbols, 8);
-				float dist_sma = sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
+				float sed_lsf = sed(symbols, lsf_sync_ext, 16);
+				float sed_pma = sed(symbols, pkt_sync_symbols, 8);
+				float sed_sma = sed(symbols, str_sync_symbols, 8);
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[960+i*5];
-				float dist_eot = sq_eucl_norm(&symbols[8], eot_symbols,      8);
-				float dist_pmb = sq_eucl_norm(&symbols[8], pkt_sync_symbols, 8);
-				float dist_smb = sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
-				float dist_pkt = sqrtf(dist_pma + ((dist_pmb < dist_eot) ? dist_pmb : dist_eot));
-				float dist_str = sqrtf(dist_sma + ((dist_smb < dist_eot) ? dist_smb : dist_eot));
+				float sed_eot = sed(symbols, eot_symbols,      8);
+				float sed_pmb = sed(symbols, pkt_sync_symbols, 8);
+				float sed_smb = sed(symbols, str_sync_symbols, 8);
+				float sed_pkt = sed_pma + (sed_pmb < sed_eot) ? sed_pmb : sed_eot;
+				float sed_str = sed_sma + (sed_smb < sed_eot) ? sed_smb : sed_eot;
 
 				//fwrite(&dist_str, 4, 1, fp);
 
 				//LSF received at idle state
-				if(dist_lsf<=4.5f && rx_state==RX_IDLE)
+				if(sed_lsf<=20.25f && rx_state==RX_IDLE)
 				{
-					//find L2's minimum
-					uint8_t sample_offset=0;
+					//find minimum
+					uint8_t sample_offset = 0;
 					for(uint8_t i=1; i<=2; i++)
 					{
 						for(uint8_t j=0; j<16; j++)
-							symbols[j]=f_flt_buff[j*5+i];
+							symbols[j] = f_flt_buff[j*5+i];
 
-						float d=eucl_norm(symbols, lsf_sync_ext, 16);
+						float d = sed(symbols, lsf_sync_ext, 16);
 
-						if(d<dist_lsf)
+						if(d < sed_lsf)
 						{
-							dist_lsf=d;
-							sample_offset=i;
+							sed_lsf = d;
+							sample_offset = i;
 						}
 					}
 
@@ -1086,10 +1086,10 @@ void CCC1200::Run()
 				}
 
 				//stream frame received
-				else if(dist_str<=5.0f)
+				else if(sed_str <= 25.0f)
 				{
-					rx_state=RX_SYNCD;
-					sample_cnt=0;		//reset rx timeout timer
+					rx_state = RX_SYNCD;
+					sample_cnt = 0;		//reset rx timeout timer
 
 					//find L2's minimum
 					uint8_t sample_offset=0;
@@ -1098,18 +1098,18 @@ void CCC1200::Run()
 						for(uint8_t j=0; j<16; j++)
 							symbols[j]=f_flt_buff[j*5+i];
 						
-						float tmp_a=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
+						float tmp_a = sed(symbols, str_sync_symbols, 8);
+						// check the next frame, look for another data frame or EOT frame
 						for(uint8_t j=0; j<16; j++)
-							symbols[j]=f_flt_buff[960+j*5+i];
-						float tmp_b=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
-						float tmp_c=sq_eucl_norm(&symbols[8], eot_symbols, 8);
+							symbols[j] = f_flt_buff[960+j*5+i];
+						float tmp_b = sed(symbols, str_sync_symbols, 8);
+						float tmp_c = sed(symbols, eot_symbols, 8);
+						float d = tmp_a + ((tmp_b < tmp_c) ? tmp_b : tmp_c);
 
-						float d=sqrtf(tmp_a + ((tmp_b < tmp_c) ? tmp_b : tmp_c));
-
-						if(d<dist_str)
+						if(d < sed_str)
 						{
-							dist_str=d;
-							sample_offset=i;
+							sed_str = d;
+							sample_offset = i;
 						}
 					}
 
@@ -1203,21 +1203,26 @@ void CCC1200::Run()
 				}
 
 				//TODO: handle packet mode reception over RF
-				else if(dist_pkt<=5.0f && rx_state==RX_SYNCD)
+				else if(sed_pkt <= 25.0f && rx_state == RX_SYNCD)
 				{
 					//find L2's minimum
-					uint8_t sample_offset=0;
+					uint8_t sample_offset = 0;
 					for(uint8_t i=1; i<=2; i++)
 					{
 						for(uint8_t j=0; j<8; j++)
 							symbols[j]=f_flt_buff[j*5+i];
 							
-						float d=eucl_norm(symbols, pkt_sync_symbols, 8);
-						
-						if(d<dist_pkt)
+						float tmp_a = sed(symbols, pkt_sync_symbols, 8);
+						for(uint8_t j=0; j<16; j++)
+							symbols[j] = f_flt_buff[960+j*5+i];
+						float tmp_b = sed(symbols, pkt_sync_symbols, 8);
+						float tmp_c = sed(symbols, eot_symbols, 8);
+						float d = tmp_a + ((tmp_b < tmp_c) ? tmp_b : tmp_c);
+
+						if(d < sed_pkt)
 						{
-							dist_pkt=d;
-							sample_offset=i;
+							sed_pkt = d;
+							sample_offset = i;
 						}
 					}
 
@@ -1606,7 +1611,25 @@ void CCC1200::Run()
 	printMsg(TERM_GREEN, "run loop terminated\n");
 }
 
-
+/**
+ * @brief Calculate squared Euclidean distance between two n-dimensional vectors.
+ * It is the sum of squared differences.
+ *
+ * @param v1 Vector 1 - floats.
+ * @param v2 Vector 2 - signed ints.
+ * @param n Vectors' size.
+ * @return float Squared distance between two points.
+ */
+float CCC1200::sed(const float *v1, const int8_t *v2, const unsigned n) const
+{
+	float d { 0.0f };
+	for (unsigned i=0; i<n; i++)
+	{
+		auto x = v1[1] - float(v2[i]);
+		d += x * x;
+	}
+	return d;
+}
 
 
 int main()
