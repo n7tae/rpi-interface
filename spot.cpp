@@ -1004,17 +1004,17 @@ void CCC1200::Run()
 				if (sed_lsf < lmin) {
 					lmin = sed_lsf;
 					timeStamp();
-					printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
+					printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f, ii=%u, raw_bsb_xx=%d\n", lmin, smin, pmin, ii, int(raw_bsb_rx[ii]));
 				}
 				if (sed_str < smin) {
 					smin = sed_str;
 					timeStamp();
-					printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
+					printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f, ii=%u, raw_bsb_xx=%d\n", lmin, smin, pmin, ii, int(raw_bsb_rx[ii]));
 				}
 				if (sed_pkt < pmin) {
 					pmin = sed_pkt;
 					timeStamp();
-					printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
+					printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f, ii=%u, raw_bsb_xx=%d\n", lmin, smin, pmin, ii, int(raw_bsb_rx[ii]));
 				}
 
 				//printMsg(TERM_YELLOW, "%.3u %6.2f %6.2f %6.2f\n", ii, sed_lsf, sed_pkt, sed_str);
