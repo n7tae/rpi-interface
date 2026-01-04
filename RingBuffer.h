@@ -42,6 +42,6 @@ public:
 private:
     T buffer[size] { 0 };
     const std::size_t capacity { size };
-    std::size_t position; // current position
+    std::size_t position = 0; // current position
 
 };
