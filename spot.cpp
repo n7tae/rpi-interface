@@ -1302,7 +1302,6 @@ void CCC1200::Run()
 			}
 			//all data has been used
 			uart_rx_data_valid = false;
-			printMsg(TERM_YELLOW, "%6.2f %6.2f\n", lmin, smin);
 		}
 
 		//receive a packet - blocking
