@@ -892,7 +892,7 @@ void CCC1200::Run()
 	uint16_t rx_buff_cnt = 0;
 	uint16_t last_fn = 0xffffu;
 	RingBuffer<int8_t, 41> flt_buff;
-	RingBuffer<float, 8*5+2*(8*5+4800/25*5)+2> f_flt_buff;
+	RingBuffer<float, 2000> f_flt_buff;
 	const int8_t lsf_sync_ext[16] { +3, -3, +3, -3, +3, -3, +3, -3, +3, +3, +3, +3, -3, -3, +3, -3 };
 	const int8_t eot_symbols[8]   { +3, +3, +3, +3, +3, +3, -3, +3 };
 
@@ -1291,7 +1291,8 @@ void CCC1200::Run()
 						got_lsf = false;
 					}
 				}
-				if (lmin < 40.f or smin < 40.f) printf("%3d %.2f %.2f %.2f\n", ii, lmin, pmin, smin);
+				//if (lmin < 40.f or smin < 40.f)
+				printf("%3d %.2f %.2f %.2f\n", ii, lmin, pmin, smin);
 			}
 
 			//all data has been used
