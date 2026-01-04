@@ -999,8 +999,10 @@ void CCC1200::Run()
 				float sed_eot = sed(symbols, eot_symbols,      8);
 				float sed_pmb = sed(symbols, pkt_sync_symbols, 8);
 				float sed_smb = sed(symbols, str_sync_symbols, 8);
-				float sed_pkt = sed_pma + (sed_pmb < sed_eot) ? sed_pmb : sed_eot;
-				float sed_str = sed_sma + (sed_smb < sed_eot) ? sed_smb : sed_eot;
+				if (sed_pmb > sed_eot) sed_pmb = sed_eot;
+				float sed_pkt = sqrtf(sed_pma*sed_pma + sed_pmb*sed_pmb);
+				if (sed_smb > sed_eot) sed_smb = sed_eot;
+				float sed_str = sqrtf(sed_sma*sed_sma + sed_smb*sed_smb);
 				if (sed_lsf < lmin) {
 					lmin = sed_lsf;
 					timeStamp();
@@ -1020,7 +1022,7 @@ void CCC1200::Run()
 				//printMsg(TERM_YELLOW, "%.3u %6.2f %6.2f %6.2f\n", ii, sed_lsf, sed_pkt, sed_str);
 
 				//LSF received at idle state
-				if(sed_lsf<=20.25f && rx_state==RX_IDLE)
+				if(sed_lsf<=4.5f && rx_state==RX_IDLE)
 				{
 					//find minimum
 					uint8_t sample_offset = 0;
@@ -1102,7 +1104,7 @@ void CCC1200::Run()
 				}
 
 				//stream frame received
-				else if(sed_str <= 25.0f)
+				else if(sed_str <= 5.0f)
 				{
 					rx_state = RX_SYNCD;
 					sample_cnt = 0;		//reset rx timeout timer
@@ -1119,8 +1121,9 @@ void CCC1200::Run()
 						for(uint8_t j=0; j<16; j++)
 							symbols[j] = f_flt_buff[960+j*5+i];
 						float tmp_b = sed(symbols, str_sync_symbols, 8);
-						float tmp_c = sed(symbols, eot_symbols, 8);
-						float d = tmp_a + ((tmp_b < tmp_c) ? tmp_b : tmp_c);
+						float tmp_e = sed(symbols, eot_symbols, 8);
+						if (tmp_e < tmp_b) tmp_b = tmp_e;
+						float d = sqrtf(tmp_a*tmp_a + tmp_b*tmp_b);
 
 						if(d < sed_str)
 						{
@@ -1219,7 +1222,7 @@ void CCC1200::Run()
 				}
 
 				//TODO: handle packet mode reception over RF
-				else if(sed_pkt <= 25.0f && rx_state == RX_SYNCD)
+				else if(sed_pkt <= 5.0f && rx_state == RX_SYNCD)
 				{
 					//find L2's minimum
 					uint8_t sample_offset = 0;
@@ -1233,7 +1236,8 @@ void CCC1200::Run()
 							symbols[j] = f_flt_buff[960+j*5+i];
 						float tmp_b = sed(symbols, pkt_sync_symbols, 8);
 						float tmp_c = sed(symbols, eot_symbols, 8);
-						float d = tmp_a + ((tmp_b < tmp_c) ? tmp_b : tmp_c);
+						if (tmp_c < tmp_b) tmp_b = tmp_c;
+						float d = sqrtf(tmp_a*tmp_a + tmp_b*tmp_b);
 
 						if(d < sed_pkt)
 						{
@@ -1643,7 +1647,7 @@ float CCC1200::sed(const float *v1, const int8_t *v2, const unsigned n) const
 		auto x = v1[1] - float(v2[i]);
 		r += x * x;
 	}
-	return r;
+	return sqrtf(r);
 }
 
 
