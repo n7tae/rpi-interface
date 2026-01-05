@@ -892,9 +892,13 @@ void CCC1200::Run()
 	uint16_t rx_buff_cnt = 0;
 	uint16_t last_fn = 0xffffu;
 	RingBuffer<int8_t, 41> flt_buff;
-	RingBuffer<float, 2000> f_flt_buff;
+	RingBuffer<float, 2042> f_flt_buff;
+	// why 2042? 8*5+2*(8*5+4800/25*5)+2 = 2042
+	// 8 preamble symbols, 8 for the syncword, and 960 for the payload.
+	// floor(sps/2)=2 extra samples for timing error correction
 	const int8_t lsf_sync_ext[16] { +3, -3, +3, -3, +3, -3, +3, -3, +3, +3, +3, +3, -3, -3, +3, -3 };
 	const int8_t eot_symbols[8]   { +3, +3, +3, +3, +3, +3, -3, +3 };
+	const float escale = 4.14647334e-6f; // 100%/0xffff/SYM_PER_PLD/2
 
 
 	lsf_t lsf;
@@ -991,14 +995,14 @@ void CCC1200::Run()
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[i*5];
 
-				float sed_lsf = sed(symbols, lsf_sync_ext, 16);
-				float sed_pma = sed(symbols, pkt_sync_symbols, 8);
+				float sed_lsf = sed(symbols,   lsf_sync_ext,    16);
+				float sed_pma = sed(symbols,   pkt_sync_symbols, 8);
 				float sed_sma = sed(symbols+8, str_sync_symbols, 8);
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[960+i*5];
-				float sed_eot = sed(symbols, eot_symbols,      8);
-				float sed_eos = sed(symbols+8, eot_symbols, 8);
-				float sed_pmb = sed(symbols, pkt_sync_symbols, 8);
+				float sed_eot = sed(symbols,   eot_symbols,      8);
+				float sed_eos = sed(symbols+8, eot_symbols,      8);
+				float sed_pmb = sed(symbols,   pkt_sync_symbols, 8);
 				float sed_smb = sed(symbols+8, str_sync_symbols, 8);
 				float sed_pkt = sed_pma + (sed_pmb < sed_eot) ? sed_pmb : sed_eot;
 				float sed_str = sed_sma + (sed_smb < sed_eos) ? sed_smb : sed_eos;
@@ -1068,8 +1072,8 @@ void CCC1200::Run()
 						last_fn=0xFFFFU;
 
 						printMsg(TERM_GREEN, "LSF ");
-						printMsg(TERM_YELLOW, "DST: %s SRC: %-9s TYPE: %04X (CAN=%d) DIST: %4.2f MER: %-3.1f%%\n", call_dst, call_src, type, can, sqrtf(sed_lsf), float(e)*6.6358762e-5f);
-						// error rate scaling (%): 100/0xffffu/SYM_PER_PLD/2 = 6.6358762e-5
+						printMsg(TERM_YELLOW, "DST: %s SRC: %-9s TYPE: %04X (CAN=%d) DIST: %4.2f MER: %-3.1f%%\n", call_dst, call_src, type, can, sqrtf(sed_lsf), float(e)*escale);
+						// error rate scaling (%): 100/0xffffu/SYM_PER_PLD/2 = 6.32711275e-10
 						if(type&1) //if stream
 						{
 							m17stream.fn=0;
@@ -1091,7 +1095,7 @@ void CCC1200::Run()
 								const auto timeinfo=localtime(&rawtime);
 								fprintf(logfile, "\"%02d:%02d:%02d\" \"%s\" \"%s\" \"RF\" \"%d\" \"%3.1f%%\"\n",
 									timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec,
-									call_src, call_dst, can, (float)e/0xFFFFU/SYM_PER_PLD/2.0f*100.0f);
+									call_src, call_dst, can, float(e)*escale);
 							}
 						}
 					}
@@ -1114,12 +1118,12 @@ void CCC1200::Run()
 						for(uint8_t j=0; j<16; j++)
 							symbols[j]=f_flt_buff[j*5+i];
 						
-						float tmp_a = sed(symbols, str_sync_symbols, 8);
+						float tmp_a = sed(symbols+8, str_sync_symbols, 8);
 						// check the next frame, look for another data frame or EOT frame
 						for(uint8_t j=0; j<16; j++)
 							symbols[j] = f_flt_buff[960+j*5+i];
 						float tmp_b = sed(symbols+8, str_sync_symbols, 8);
-						float tmp_e = sed(symbols+8, eot_symbols, 8);
+						float tmp_e = sed(symbols+8, eot_symbols,      8);
 						float d = tmp_a + ((tmp_e > tmp_b) ? tmp_b : tmp_e);
 
 						if(d < sed_str)
@@ -1192,7 +1196,7 @@ void CCC1200::Run()
 
 						timeStamp();
 						printMsg(TERM_YELLOW, " RF FRM: ");
-						printMsg(TERM_YELLOW, "FN:%04X LICH_CNT:%d DIST:%5.2f MER:%:4.1f%%\n", fn, lich_cnt, sqrtf(sed_str), float(e)*6.6358762e-5f);
+						printMsg(TERM_YELLOW, "FN:%04X LICH_CNT:%d DIST:%5.2f MER:%4.1f%%\n", fn, lich_cnt, sqrtf(sed_str), float(e)*escale);
 
 						if(got_lsf)
 						{
@@ -1289,6 +1293,7 @@ void CCC1200::Run()
 					sample_cnt++;
 					if(sample_cnt==960*2)
 					{
+						timeStamp();
 						printMsg(TERM_RED, "RF Timeout\n");
 						rx_state=RX_IDLE;
 						sample_cnt=0;
