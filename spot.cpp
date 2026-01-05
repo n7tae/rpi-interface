@@ -916,7 +916,7 @@ void CCC1200::Run()
 	fd_set rfds;
 	int maxfd = (fd > sockt) ? fd : sockt;
 
-	float lmin = 144, pmin = 72, smin = 72;
+	//float lmin = 144, pmin = 72, smin = 72;
 
 	while(keep_running)
 	{
@@ -1001,21 +1001,21 @@ void CCC1200::Run()
 				float sed_smb = sed(symbols, str_sync_symbols, 8);
 				float sed_pkt = sed_pma + (sed_pmb < sed_eot) ? sed_pmb : sed_eot;
 				float sed_str = sed_sma + (sed_smb < sed_eot) ? sed_smb : sed_eot;
-				if (sed_lsf < lmin) {
-					lmin = sed_lsf;
-					timeStamp();
-					printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f, ii=%3u, raw_bsb_xx=%4d\n", lmin, smin, pmin, ii, int(raw_bsb_rx[ii]));
-				}
-				if (sed_str < smin) {
-					smin = sed_str;
-					timeStamp();
-					printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f, ii=%3u, raw_bsb_xx=%4d\n", lmin, smin, pmin, ii, int(raw_bsb_rx[ii]));
-				}
-				if (sed_pkt < pmin) {
-					pmin = sed_pkt;
-					timeStamp();
-					printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f, ii=%3u, raw_bsb_xx=%4d\n", lmin, smin, pmin, ii, int(raw_bsb_rx[ii]));
-				}
+				// if (sed_lsf < lmin) {
+				// 	lmin = sed_lsf;
+				// 	timeStamp();
+				// 	printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f, ii=%3u, raw_bsb_xx=%4d\n", lmin, smin, pmin, ii, int(raw_bsb_rx[ii]));
+				// }
+				// if (sed_str < smin) {
+				// 	smin = sed_str;
+				// 	timeStamp();
+				// 	printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f, ii=%3u, raw_bsb_xx=%4d\n", lmin, smin, pmin, ii, int(raw_bsb_rx[ii]));
+				// }
+				// if (sed_pkt < pmin) {
+				// 	pmin = sed_pkt;
+				// 	timeStamp();
+				// 	printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f, ii=%3u, raw_bsb_xx=%4d\n", lmin, smin, pmin, ii, int(raw_bsb_rx[ii]));
+				// }
 
 				//printMsg(TERM_YELLOW, "%.3u %6.2f %6.2f %6.2f\n", ii, sed_lsf, sed_pkt, sed_str);
 
@@ -1066,10 +1066,9 @@ void CCC1200::Run()
 
 						last_fn=0xFFFFU;
 
-						printMsg(TERM_GREEN, " CRC OK ");
-						printMsg(TERM_YELLOW, "| DST: %s | SRC: %-9s | TYPE: %04X (CAN=%d) | MER: %-3.1f%%\n",
-							call_dst, call_src, type, can, (float)e/0xFFFFU/SYM_PER_PLD/2.0f*100.0f);
-
+						printMsg(TERM_GREEN, "LSF ");
+						printMsg(TERM_YELLOW, "DST: %s SRC: %-9s TYPE: %04X (CAN=%d) DIST: %4.2f MER: %-3.1f%%\n", call_dst, call_src, type, can, sqrtf(sed_lsf), float(e)*6.6358762e-5f);
+						// error rate scaling (%): 100/0xffffu/SYM_PER_PLD/2 = 6.6358762e-5
 						if(type&1) //if stream
 						{
 							m17stream.fn=0;
@@ -1097,7 +1096,7 @@ void CCC1200::Run()
 					}
 					else
 					{
-						printMsg(TERM_RED, " CRC ERR\n");
+						printMsg(TERM_RED, "CRC ERR\n");
 					}
 				}
 
@@ -1170,7 +1169,7 @@ void CCC1200::Run()
 									decode_callsign_bytes(call_src, &lsf_b[6]);
 
 									timeStamp();
-									printMsg(TERM_YELLOW, "LSF REC: DST: %-9s | SRC: %-9s | TYPE: %04X (CAN=%d)\n",
+									printMsg(TERM_YELLOW, "LSF REC: DST:%-9s SRC:%-9s TYPE: %04X (CAN=%d)\n",
 										call_dst, call_src, type, can);
 
 									if(logfile)
@@ -1192,12 +1191,7 @@ void CCC1200::Run()
 
 						timeStamp();
 						printMsg(TERM_YELLOW, " RF FRM: ");
-						printMsg(TERM_YELLOW, " FN:%04X | LICH_CNT:%d", fn, lich_cnt);
-						/*printMsg(TERM_YELLOW, " | PLD: ");
-						for(uint8_t i=0; i<128/8; i++)
-							printMsg(TERM_YELLOW, "%02X", frame_data[2+i]);*/
-						printMsg(TERM_YELLOW, " | MER: %-3.1f%%\n",
-							(float)e/0xFFFFU/SYM_PER_PLD/2.0f*100.0f);
+						printMsg(TERM_YELLOW, "FN:%04X LICH_CNT:%d DIST:%5.2f MER:%:4.1f%%\n", fn, lich_cnt, sqrtf(sed_str), float(e)*6.6358762e-5f);
 
 						if(got_lsf)
 						{
@@ -1294,6 +1288,7 @@ void CCC1200::Run()
 					sample_cnt++;
 					if(sample_cnt==960*2)
 					{
+						printMsg(TERM_RED, "RF Timeout");
 						rx_state=RX_IDLE;
 						sample_cnt=0;
 						first_frame = true;

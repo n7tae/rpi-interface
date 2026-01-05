@@ -22,14 +22,14 @@ template <typename T, unsigned int size>
 class RingBuffer
 {
 public:
-    void Push(const T& item)
+	void Push(const T& item)
 	{
-        buffer[position++] = item;
-        position %= capacity;
-    }
+		buffer[position++] = item;
+		position %= capacity;
+	}
 
-    // Get an element from the buffer
-    T operator[](unsigned index) const
+	// Get an element from the buffer
+	T operator[](unsigned index) const
 	{
 		return buffer[(index + position) % capacity];
 	}
@@ -40,8 +40,7 @@ public:
 	}
 
 private:
-    T buffer[size] { 0 };
-    const std::size_t capacity { size };
-    std::size_t position = 0; // current position
-
+	T buffer[size] { 0 };
+	const std::size_t capacity { size };
+	std::size_t position = 0; // current position
 };
