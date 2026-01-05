@@ -993,28 +993,29 @@ void CCC1200::Run()
 
 				float sed_lsf = sed(symbols, lsf_sync_ext, 16);
 				float sed_pma = sed(symbols, pkt_sync_symbols, 8);
-				float sed_sma = sed(symbols, str_sync_symbols, 8);
+				float sed_sma = sed(symbols+8, str_sync_symbols, 8);
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[960+i*5];
 				float sed_eot = sed(symbols, eot_symbols,      8);
+				float sed_eos = sed(symbols+8, eot_symbols, 8);
 				float sed_pmb = sed(symbols, pkt_sync_symbols, 8);
-				float sed_smb = sed(symbols, str_sync_symbols, 8);
+				float sed_smb = sed(symbols+8, str_sync_symbols, 8);
 				float sed_pkt = sed_pma + (sed_pmb < sed_eot) ? sed_pmb : sed_eot;
-				float sed_str = sed_sma + (sed_smb < sed_eot) ? sed_smb : sed_eot;
+				float sed_str = sed_sma + (sed_smb < sed_eos) ? sed_smb : sed_eos;
 				// if (sed_lsf < lmin) {
 				// 	lmin = sed_lsf;
 				// 	timeStamp();
-				// 	printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f, ii=%3u, raw_bsb_xx=%4d\n", lmin, smin, pmin, ii, int(raw_bsb_rx[ii]));
+				// 	printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
 				// }
 				// if (sed_str < smin) {
 				// 	smin = sed_str;
 				// 	timeStamp();
-				// 	printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f, ii=%3u, raw_bsb_xx=%4d\n", lmin, smin, pmin, ii, int(raw_bsb_rx[ii]));
+				// 	printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
 				// }
 				// if (sed_pkt < pmin) {
 				// 	pmin = sed_pkt;
 				// 	timeStamp();
-				// 	printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f, ii=%3u, raw_bsb_xx=%4d\n", lmin, smin, pmin, ii, int(raw_bsb_rx[ii]));
+				// 	printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
 				// }
 
 				//printMsg(TERM_YELLOW, "%.3u %6.2f %6.2f %6.2f\n", ii, sed_lsf, sed_pkt, sed_str);
@@ -1117,8 +1118,8 @@ void CCC1200::Run()
 						// check the next frame, look for another data frame or EOT frame
 						for(uint8_t j=0; j<16; j++)
 							symbols[j] = f_flt_buff[960+j*5+i];
-						float tmp_b = sed(symbols, str_sync_symbols, 8);
-						float tmp_e = sed(symbols, eot_symbols, 8);
+						float tmp_b = sed(symbols+8, str_sync_symbols, 8);
+						float tmp_e = sed(symbols+8, eot_symbols, 8);
 						float d = tmp_a + ((tmp_e > tmp_b) ? tmp_b : tmp_e);
 
 						if(d < sed_str)
@@ -1288,7 +1289,7 @@ void CCC1200::Run()
 					sample_cnt++;
 					if(sample_cnt==960*2)
 					{
-						printMsg(TERM_RED, "RF Timeout");
+						printMsg(TERM_RED, "RF Timeout\n");
 						rx_state=RX_IDLE;
 						sample_cnt=0;
 						first_frame = true;
