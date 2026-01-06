@@ -1143,7 +1143,7 @@ void CCC1200::Run()
 					uint8_t lich_cnt;
 					uint8_t frame_data[128/8];
 					uint32_t e = decode_str_frame(frame_data, lich, &fn, &lich_cnt, pld);
-					uint16_t frame_count = fn & 0x7fffu;					
+					uint16_t frame_count = fn & 0x7fffu;
 					//set the last FN number to FN-1 if this is a late-join and the frame data is valid
 					if(first_frame and (frame_count % 6) == lich_cnt)
 					{
