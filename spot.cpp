@@ -994,18 +994,17 @@ void CCC1200::Run()
 				float symbols[16];
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[i*5];
-
 				float sed_lsf = sed(symbols,   lsf_sync_ext,    16);
-				float sed_pma = sed(symbols,   pkt_sync_symbols, 8);
 				float sed_sma = sed(symbols+8, str_sync_symbols, 8);
+				float sed_pma = sed(symbols,   pkt_sync_symbols, 8);
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[960+i*5];
-				float sed_eot = sed(symbols,   eot_symbols,      8);
 				float sed_eos = sed(symbols+8, eot_symbols,      8);
-				float sed_pmb = sed(symbols,   pkt_sync_symbols, 8);
 				float sed_smb = sed(symbols+8, str_sync_symbols, 8);
-				float sed_pkt = sed_pma + ((sed_pmb < sed_eot) ? sed_pmb : sed_eot);
 				float sed_str = sed_sma + ((sed_smb < sed_eos) ? sed_smb : sed_eos);
+				float sed_eop = sed(symbols,   eot_symbols,      8);
+				float sed_pmb = sed(symbols,   pkt_sync_symbols, 8);
+				float sed_pkt = sed_pma + ((sed_pmb < sed_eop) ? sed_pmb : sed_eop);
 				// if (sed_lsf < lmin) {
 				// 	lmin = sed_lsf;
 				// 	timeStamp();
