@@ -1004,8 +1004,8 @@ void CCC1200::Run()
 				float sed_eos = sed(symbols+8, eot_symbols,      8);
 				float sed_pmb = sed(symbols,   pkt_sync_symbols, 8);
 				float sed_smb = sed(symbols+8, str_sync_symbols, 8);
-				float sed_pkt = sed_pma + (sed_pmb < sed_eot) ? sed_pmb : sed_eot;
-				float sed_str = sed_sma + (sed_smb < sed_eos) ? sed_smb : sed_eos;
+				float sed_pkt = sed_pma + ((sed_pmb < sed_eot) ? sed_pmb : sed_eot);
+				float sed_str = sed_sma + ((sed_smb < sed_eos) ? sed_smb : sed_eos);
 				// if (sed_lsf < lmin) {
 				// 	lmin = sed_lsf;
 				// 	timeStamp();
@@ -1124,7 +1124,7 @@ void CCC1200::Run()
 							symbols[j] = f_flt_buff[960+j*5+i];
 						float tmp_b = sed(symbols+8, str_sync_symbols, 8);
 						float tmp_e = sed(symbols+8, eot_symbols,      8);
-						float d = tmp_a + ((tmp_e > tmp_b) ? tmp_b : tmp_e);
+						float d = tmp_a + ((tmp_b < tmp_e) ? tmp_b : tmp_e);
 
 						if(d < sed_str)
 						{
