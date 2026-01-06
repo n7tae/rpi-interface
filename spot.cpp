@@ -1290,7 +1290,7 @@ void CCC1200::Run()
 				if(rx_state==RX_SYNCD)
 				{
 					sample_cnt++;
-					if(960*2 >= sample_cnt)
+					if(960*2 <= sample_cnt) // 80 ms without detecting anything in the sync'ed state
 					{
 						timeStamp();
 						printMsg(TERM_RED, "RF Timeout\n");
