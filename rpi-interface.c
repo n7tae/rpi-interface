@@ -1387,9 +1387,9 @@ int main(int argc, char* argv[])
 				float dist_str=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[960+i*5];
-				float dist_str_b=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
+				float dist_stb=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
 				float dist_eot=sq_eucl_norm(&symbols[8], eot_symbols, 0);
-				dist_str+= ((dist_str < dist_eot) ? dist_str : dist_eot);
+				dist_str+=((dist_stb < dist_eot) ? dist_stb : dist_eot);
 
 				//fwrite(&dist_str, 4, 1, fp);
 
