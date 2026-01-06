@@ -1107,7 +1107,7 @@ void CCC1200::Run()
 				//stream frame received
 				else if(sed_str <= 5.0f)
 				{
-					//rx_state = RX_SYNCD;
+					rx_state = RX_SYNCD;
 					sample_cnt = 0;		//reset rx timeout timer
 
 					//find L2's minimum
@@ -1290,7 +1290,7 @@ void CCC1200::Run()
 				if(rx_state==RX_SYNCD)
 				{
 					sample_cnt++;
-					if(sample_cnt==960*2)
+					if(960*2 >= sample_cnt)
 					{
 						timeStamp();
 						printMsg(TERM_RED, "RF Timeout\n");
