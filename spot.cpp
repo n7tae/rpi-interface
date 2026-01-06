@@ -994,17 +994,16 @@ void CCC1200::Run()
 				float symbols[16];
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[i*5];
-				float sed_lsf = sed(symbols,   lsf_sync_ext,    16);
-				float sed_sma = sed(symbols+8, str_sync_symbols, 8);
-				float sed_pma = sed(symbols,   pkt_sync_symbols, 8);
+				float sed_lsf = sed(symbols, lsf_sync_ext,    16);
+				float sed_sma = sed(symbols, str_sync_symbols, 8);
+				float sed_pma = sed(symbols, pkt_sync_symbols, 8);
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[960+i*5];
-				float sed_eos = sed(symbols+8, eot_symbols,      8);
-				float sed_smb = sed(symbols+8, str_sync_symbols, 8);
-				float sed_str = sed_sma + ((sed_smb < sed_eos) ? sed_smb : sed_eos);
-				float sed_eop = sed(symbols,   eot_symbols,      8);
-				float sed_pmb = sed(symbols,   pkt_sync_symbols, 8);
-				float sed_pkt = sed_pma + ((sed_pmb < sed_eop) ? sed_pmb : sed_eop);
+				float sed_eot = sed(symbols, eot_symbols,      8);
+				float sed_smb = sed(symbols, str_sync_symbols, 8);
+				float sed_str = sed_sma + ((sed_smb < sed_eot) ? sed_smb : sed_eot);
+				float sed_pmb = sed(symbols, pkt_sync_symbols, 8);
+				float sed_pkt = sed_pma + ((sed_pmb < sed_eot) ? sed_pmb : sed_eot);
 				// if (sed_lsf < lmin) {
 				// 	lmin = sed_lsf;
 				// 	timeStamp();
@@ -1117,12 +1116,12 @@ void CCC1200::Run()
 						for(uint8_t j=0; j<16; j++)
 							symbols[j]=f_flt_buff[j*5+i];
 						
-						float tmp_a = sed(symbols+8, str_sync_symbols, 8);
+						float tmp_a = sed(symbols, str_sync_symbols, 8);
 						// check the next frame, look for another data frame or EOT frame
 						for(uint8_t j=0; j<16; j++)
 							symbols[j] = f_flt_buff[960+j*5+i];
-						float tmp_b = sed(symbols+8, str_sync_symbols, 8);
-						float tmp_e = sed(symbols+8, eot_symbols,      8);
+						float tmp_b = sed(symbols, str_sync_symbols, 8);
+						float tmp_e = sed(symbols, eot_symbols,      8);
 						float d = tmp_a + ((tmp_b < tmp_e) ? tmp_b : tmp_e);
 
 						if(d < sed_str)
@@ -1136,7 +1135,7 @@ void CCC1200::Run()
 					
 					for(uint16_t i=0; i<SYM_PER_PLD; i++)
 					{
-						pld[i]=f_flt_buff[16*5+i*5+sample_offset];
+						pld[i]=f_flt_buff[40+i*5+sample_offset];
 					}
 
 					uint8_t lich[6];
