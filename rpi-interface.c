@@ -1517,14 +1517,14 @@ int main(int argc, char* argv[])
 					uint8_t lich_cnt;
 					uint8_t frame_data[128/8];
 					uint32_t e = decode_str_frame(frame_data, lich, &fn, &lich_cnt, pld);
-					
+					uint16_t frame_count = fn&0x7FFFU;
 					//set the last FN number to FN-1 if this is a late-join and the frame data is valid
-					if(first_frame==1 && (fn%6)==lich_cnt)
+					if(first_frame==1 && (frame_count%6)==lich_cnt)
 					{
-						last_fn=fn-1;
+						last_fn=frame_count-1;
 					}
 					
-					if(((last_fn+1)&0xFFFFU)==fn) //new frame. TODO: maybe a timeout would be better
+					if(((last_fn+1)&0xFFFFU)==frame_count) //new frame. TODO: maybe a timeout would be better
 					{
 						if(lich_parts!=0x3FU) //6 chunks = 0b111111
 						{
