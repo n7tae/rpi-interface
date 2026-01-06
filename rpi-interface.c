@@ -158,6 +158,7 @@ uint8_t lsf_b[30];							//raw decoded LSF
 uint8_t first_frame=1;						//first decoded frame after SYNC?
 uint8_t lich_parts=0;						//LICH chunks received (bit flags)
 uint8_t got_lsf=0;							//got LSF? either from LSF or reconstructed from LICH
+const int8_t eot_symbols[8] = { +3, +3, +3, +3, +3, +3, -3, +3 };
 
 //timer for timeouts
 uint32_t tx_timer=0;
@@ -1381,13 +1382,14 @@ int main(int argc, char* argv[])
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[i*5];
 
-				float dist_lsf=eucl_norm(&symbols[0], lsf_sync_ext, 16); //check against extended LSF syncword (8 symbols, alternating -3/+3)
-				float dist_pkt=eucl_norm(&symbols[0], pkt_sync_symbols, 8);
-				float dist_str_a=eucl_norm(&symbols[8], str_sync_symbols, 8);
+				float dist_lsf=sq_eucl_norm(&symbols[0], lsf_sync_ext, 16); //check against extended LSF syncword (8 symbols, alternating -3/+3)
+				float dist_pkt=sq_eucl_norm(&symbols[0], pkt_sync_symbols, 8);
+				float dist_str=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[960+i*5];
-				float dist_str_b=eucl_norm(&symbols[8], str_sync_symbols, 8);
-				float dist_str=sqrtf(dist_str_a*dist_str_a+dist_str_b*dist_str_b);
+				float dist_str_b=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
+				float dist_eot=sq_eucl_norm(&symbols[8], eot_symbols, 0);
+				dist_str+= ((dist_str < dist_eot) ? dist_str : dist_eot);
 
 				//fwrite(&dist_str, 4, 1, fp);
 
@@ -1401,7 +1403,7 @@ int main(int argc, char* argv[])
 						for(uint8_t j=0; j<16; j++)
 							symbols[j]=f_flt_buff[j*5+i];
 
-						float d=eucl_norm(symbols, lsf_sync_ext, 16);
+						float d=sq_eucl_norm(symbols, lsf_sync_ext, 16);
 
 						if(d<dist_lsf)
 						{
@@ -1489,13 +1491,13 @@ int main(int argc, char* argv[])
 						for(uint8_t j=0; j<16; j++)
 							symbols[j]=f_flt_buff[j*5+i];
 						
-						float tmp_a=eucl_norm(&symbols[8], str_sync_symbols, 8);
+						float tmp_a=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
 						for(uint8_t j=0; j<16; j++)
 							symbols[j]=f_flt_buff[960+j*5+i];
-						
-						float tmp_b=eucl_norm(&symbols[8], str_sync_symbols, 8);
+						float tmp_b=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
+						float tmp_e=sq_eucl_norm(&symbols[8], eot_symbols, 8);
 
-						float d=sqrtf(tmp_a*tmp_a+tmp_b*tmp_b);
+						float d=tmp_a+((tmp_b<tmp_e)?tmp_b:tmp_e);
 
 						if(d<dist_str)
 						{
@@ -1609,8 +1611,12 @@ int main(int argc, char* argv[])
 					{
 						for(uint8_t j=0; j<8; j++)
 							symbols[j]=f_flt_buff[j*5+i];
-							
-						float d=eucl_norm(symbols, pkt_sync_symbols, 8);
+						float d=sq_eucl_norm(symbols, pkt_sync_symbols, 8);
+						for(uint8_t j=0; j<16; j++)
+							symbols[j]=f_flt_buff[960+j*5+i];
+						float p=sq_eucl_norm(symbols, str_sync_symbols, 8);
+						float e=sq_eucl_norm(symbols, eot_symbols, 8);
+						d+=((p<e)?p:e);
 						
 						if(d<dist_pkt)
 						{
