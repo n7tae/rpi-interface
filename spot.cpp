@@ -1143,16 +1143,16 @@ void CCC1200::Run()
 					uint8_t lich_cnt;
 					uint8_t frame_data[128/8];
 					uint32_t e = decode_str_frame(frame_data, lich, &fn, &lich_cnt, pld);
-					
+					uint16_t frame_count = fn & 0x7fffu;					
 					//set the last FN number to FN-1 if this is a late-join and the frame data is valid
-					if(first_frame and (fn%6)==lich_cnt)
+					if(first_frame and (frame_count % 6) == lich_cnt)
 					{
-						last_fn=fn-1;
+						last_fn = frame_count-1;
 					}
 					
-					if(((last_fn+1)&0xFFFFU)==fn) //new frame. TODO: maybe a timeout would be better
+					if(((last_fn + 1) & 0x7fffu) == frame_count) //new frame. TODO: maybe a timeout would be better
 					{
-						if(lich_parts!=0x3FU) //6 chunks = 0b111111
+						if(lich_parts != 0x3FU) //6 chunks = 0b111111
 						{
 							//reconstruct LSF chunk by chunk
 							memcpy(&lsf_b[lich_cnt*5], lich, 40/8); //40 bits
