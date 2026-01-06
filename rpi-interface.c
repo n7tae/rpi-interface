@@ -1,7 +1,7 @@
 /*
  * rpi-interface.c
  *
- * Edited on: Dec 1, 2025
+ * Edited on: Dec 22, 2025
  * Author: Wojciech Kaczmarski, SP5WWP
  *         M17 Foundation
  */
@@ -158,6 +158,7 @@ uint8_t lsf_b[30];							//raw decoded LSF
 uint8_t first_frame=1;						//first decoded frame after SYNC?
 uint8_t lich_parts=0;						//LICH chunks received (bit flags)
 uint8_t got_lsf=0;							//got LSF? either from LSF or reconstructed from LICH
+const int8_t eot_symbols[8] = { +3, +3, +3, +3, +3, +3, -3, +3 };
 
 //timer for timeouts
 uint32_t tx_timer=0;
@@ -981,7 +982,8 @@ void sigint_handler(int val)
 }
 
 //samples per symbol (sps) = 5
-void filter_symbols(int8_t out[SYM_PER_FRA*5], const int8_t in[SYM_PER_FRA], const float* flt, uint8_t phase_inv)
+//old code - deprecated
+/*void filter_symbols(int8_t *out, const int8_t *in, const float* flt, uint8_t phase_inv)
 {
 	#define FLT_LEN 41
 	static int8_t last[FLT_LEN]; //memory for last symbols
@@ -1017,6 +1019,71 @@ void filter_symbols(int8_t out[SYM_PER_FRA*5], const int8_t in[SYM_PER_FRA], con
 	{
 		for(uint8_t i=0; i<FLT_LEN; i++)
 			last[i]=0;
+	}
+}*/
+
+//new, polyphase filter implementation
+void filter_symbols(int8_t* __restrict out, const int8_t* __restrict in, const float* __restrict flt, uint8_t phase_inv)
+{
+	#define FLT_LEN 41
+    #define TAPS_PER_PHASE 9
+
+	//history
+	static float sr[TAPS_PER_PHASE * 2] = {0};
+	static uint8_t w = 0;
+
+	//flush filter state
+	if (in == NULL)
+	{
+		memset(sr, 0, sizeof(sr));
+		w = 0;
+		return;
+	}
+
+	//precompute gain and sign once
+    static const float gain = TX_SYMBOL_SCALING_COEFF*sqrtf(5.0f);
+	const float sign = phase_inv ? -1.0f : 1.0f;
+
+	for (uint16_t i = 0; i < SYM_PER_FRA; i++)
+	{
+		//insert new sample per symbol
+		const float x = (float)in[i] * sign;
+
+		//store once, duplicated for linear access
+		float * __restrict hp = &sr[w];
+		hp[0]			   = x;
+		hp[TAPS_PER_PHASE] = x;
+
+		//phase pointer
+		const float * __restrict tp = flt;
+
+		//generate sps (5) output samples
+		for (uint8_t ph = 0; ph < 5; ph++)
+		{
+			float acc;
+
+			//fully unrolled 9-tap dot product
+			acc  = hp[0] * tp[0];
+			acc += hp[1] * tp[1];
+			acc += hp[2] * tp[2];
+			acc += hp[3] * tp[3];
+			acc += hp[4] * tp[4];
+			acc += hp[5] * tp[5];
+			acc += hp[6] * tp[6];
+			acc += hp[7] * tp[7];
+			acc += hp[8] * tp[8];
+
+			out[i*5 + ph] = (int8_t)(acc * gain);
+
+			//advance to next phase coefficients
+			tp += TAPS_PER_PHASE;
+		}
+
+		//circular index update without modulo
+		if (w == 0)
+			w = TAPS_PER_PHASE-1;
+		else
+			w--;
 	}
 }
 
@@ -1296,7 +1363,7 @@ int main(int argc, char* argv[])
 
 			for (uint16_t i=0; i<960; i++)
 			{
-				//push buffer
+				//push buffer TODO: please optimize this. eyes hurt
 				for(uint8_t i=0; i<sizeof(flt_buff)-1; i++)
 					flt_buff[i] = flt_buff[i+1];
 				flt_buff[sizeof(flt_buff)-1] = raw_bsb_rx[i];
@@ -1315,13 +1382,14 @@ int main(int argc, char* argv[])
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[i*5];
 
-				float dist_lsf=eucl_norm(&symbols[0], lsf_sync_ext, 16); //check against extended LSF syncword (8 symbols, alternating -3/+3)
-				float dist_pkt=eucl_norm(&symbols[0], pkt_sync_symbols, 8);
-				float dist_str_a=eucl_norm(&symbols[8], str_sync_symbols, 8);
+				float dist_lsf=sq_eucl_norm(&symbols[0], lsf_sync_ext, 16); //check against extended LSF syncword (8 symbols, alternating -3/+3)
+				float dist_pkt=sq_eucl_norm(&symbols[0], pkt_sync_symbols, 8);
+				float dist_str=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
 				for(uint8_t i=0; i<16; i++)
 					symbols[i]=f_flt_buff[960+i*5];
-				float dist_str_b=eucl_norm(&symbols[8], str_sync_symbols, 8);
-				float dist_str=sqrtf(dist_str_a*dist_str_a+dist_str_b*dist_str_b);
+				float dist_stb=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
+				float dist_eot=sq_eucl_norm(&symbols[8], eot_symbols, 0);
+				dist_str+=((dist_stb < dist_eot) ? dist_stb : dist_eot);
 
 				//fwrite(&dist_str, 4, 1, fp);
 
@@ -1335,7 +1403,7 @@ int main(int argc, char* argv[])
 						for(uint8_t j=0; j<16; j++)
 							symbols[j]=f_flt_buff[j*5+i];
 
-						float d=eucl_norm(symbols, lsf_sync_ext, 16);
+						float d=sq_eucl_norm(symbols, lsf_sync_ext, 16);
 
 						if(d<dist_lsf)
 						{
@@ -1423,13 +1491,13 @@ int main(int argc, char* argv[])
 						for(uint8_t j=0; j<16; j++)
 							symbols[j]=f_flt_buff[j*5+i];
 						
-						float tmp_a=eucl_norm(&symbols[8], str_sync_symbols, 8);
+						float tmp_a=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
 						for(uint8_t j=0; j<16; j++)
 							symbols[j]=f_flt_buff[960+j*5+i];
-						
-						float tmp_b=eucl_norm(&symbols[8], str_sync_symbols, 8);
+						float tmp_b=sq_eucl_norm(&symbols[8], str_sync_symbols, 8);
+						float tmp_e=sq_eucl_norm(&symbols[8], eot_symbols, 8);
 
-						float d=sqrtf(tmp_a*tmp_a+tmp_b*tmp_b);
+						float d=tmp_a+((tmp_b<tmp_e)?tmp_b:tmp_e);
 
 						if(d<dist_str)
 						{
@@ -1449,14 +1517,14 @@ int main(int argc, char* argv[])
 					uint8_t lich_cnt;
 					uint8_t frame_data[128/8];
 					uint32_t e = decode_str_frame(frame_data, lich, &fn, &lich_cnt, pld);
-					
+					uint16_t frame_count = fn&0x7FFFU;
 					//set the last FN number to FN-1 if this is a late-join and the frame data is valid
-					if(first_frame==1 && (fn%6)==lich_cnt)
+					if(first_frame==1 && (frame_count%6)==lich_cnt)
 					{
-						last_fn=fn-1;
+						last_fn=frame_count-1;
 					}
 					
-					if(((last_fn+1)&0xFFFFU)==fn) //new frame. TODO: maybe a timeout would be better
+					if(((last_fn+1)&0xFFFFU)==frame_count) //new frame. TODO: maybe a timeout would be better
 					{
 						if(lich_parts!=0x3FU) //6 chunks = 0b111111
 						{
@@ -1543,8 +1611,12 @@ int main(int argc, char* argv[])
 					{
 						for(uint8_t j=0; j<8; j++)
 							symbols[j]=f_flt_buff[j*5+i];
-							
-						float d=eucl_norm(symbols, pkt_sync_symbols, 8);
+						float d=sq_eucl_norm(symbols, pkt_sync_symbols, 8);
+						for(uint8_t j=0; j<16; j++)
+							symbols[j]=f_flt_buff[960+j*5+i];
+						float p=sq_eucl_norm(symbols, str_sync_symbols, 8);
+						float e=sq_eucl_norm(symbols, eot_symbols, 8);
+						d+=((p<e)?p:e);
 						
 						if(d<dist_pkt)
 						{
@@ -1653,8 +1725,7 @@ int main(int argc, char* argv[])
 				memcpy(m17stream.pld, &rx_buff[(32+16+224+16)/8U], 128/8);
 
 				int8_t frame_symbols[SYM_PER_FRA];						//raw frame symbols
-				int8_t bsb_samples[SYM_PER_FRA*5];						//filtered baseband samples = symbols*sps
-				uint8_t bsb_chunk[963] = {CMD_TX_DATA, 0xC3, 0x03};		//baseband samples wrapped in a frame
+				int8_t bsb_samples[963] = {CMD_TX_DATA, 0xC3, 0x03};	//baseband samples wrapped in a frame
 
 				if(tx_state==TX_IDLE) //first received frame
 				{
@@ -1677,8 +1748,8 @@ int main(int argc, char* argv[])
 
 					//generate META field
 					//remove trailing spaces and suffixes
-					uint8_t trimmed_src[12], enc_trimmed_src[6];
-					for(uint8_t i=0; i<12; i++)
+					uint8_t trimmed_src[10], enc_trimmed_src[6];
+					for(uint8_t i=0; i<10; i++)
 					{
 						if(src_call[i]!=' ')
 							trimmed_src[i]=src_call[i];
@@ -1737,25 +1808,22 @@ int main(int argc, char* argv[])
 					gen_preamble_i8(frame_symbols, &frame_buff_cnt, PREAM_LSF);
 
 					//filter and send out to the device
-					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-					write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
+					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
+					write(fd, bsb_samples, sizeof(bsb_samples));
 
 					//now the LSF
 					gen_frame_i8(frame_symbols, NULL, FRAME_LSF, &(m17stream.lsf), 0, 0);
 
 					//filter and send out to the device
-					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-					write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
+					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
+					write(fd, bsb_samples, sizeof(bsb_samples));
 
 					//finally, the first frame
 					gen_frame_i8(frame_symbols, m17stream.pld, FRAME_STR, &(m17stream.lsf), (m17stream.fn&0x7FFFU)%6, m17stream.fn);
 
 					//filter and send out to the device
-					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-					write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
+					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
+					write(fd, bsb_samples, sizeof(bsb_samples));
 				}
 				else
 				{
@@ -1763,9 +1831,8 @@ int main(int argc, char* argv[])
 					gen_frame_i8(frame_symbols, m17stream.pld, FRAME_STR, &(m17stream.lsf), (m17stream.fn&0x7FFFU)%6, m17stream.fn);
 
 					//filter and send out to the device
-					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-					write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
+					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
+					write(fd, bsb_samples, sizeof(bsb_samples));
 				}
 
 				time(&rawtime);
@@ -1786,9 +1853,8 @@ int main(int argc, char* argv[])
 					gen_eot_i8(frame_symbols, &frame_buff_cnt);
 
 					//filter and send out to the device
-					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
-					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-					write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
+					filter_symbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
+					write(fd, bsb_samples, sizeof(bsb_samples));
 
 					time(&rawtime);
 					timeinfo=localtime(&rawtime);
@@ -1880,17 +1946,17 @@ int main(int argc, char* argv[])
 				gen_preamble_i8(frame_symbols, &frame_buff_cnt, PREAM_LSF);
 				
 				//filter and send out to the device
-				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
+				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
 				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-				write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
+				write(fd, bsb_samples, sizeof(bsb_samples));
 				
 				//now the LSF
 				gen_frame_i8(frame_symbols, NULL, FRAME_LSF, (lsf_t*)&rx_buff[4], 0, 0);
 				
 				//filter and send out to the device
-				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
+				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
 				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-				write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
+				write(fd, bsb_samples, sizeof(bsb_samples));
 				
 				//packet frames
 				uint16_t pld_len=rx_len-(4+240/8); //"M17P" plus 240-bit LSD
@@ -1902,9 +1968,9 @@ int main(int argc, char* argv[])
 					memcpy(pld, &rx_buff[4+240/8+frame*25], 25);
 					pld[25]=frame<<2;
 					gen_frame_i8(frame_symbols, pld, FRAME_PKT, NULL, 0, 0);
-					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
+					filter_symbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
 					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-					write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
+					write(fd, bsb_samples, sizeof(bsb_samples));
 					pld_len-=25;
 					frame++;
 					usleep(40*1000U);
@@ -1913,9 +1979,9 @@ int main(int argc, char* argv[])
 				memcpy(pld, &rx_buff[4+240/8+frame*25], pld_len);
 				pld[25]=(1<<7)|(pld_len<<2); //EoT flag set, amount of remaining data in the 'frame number' field
 				gen_frame_i8(frame_symbols, pld, FRAME_PKT, NULL, 0, 0);
-				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
+				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
 				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-				write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
+				write(fd, bsb_samples, sizeof(bsb_samples));
 				usleep(40*1000U);
 
 				//now the final EOT marker
@@ -1923,9 +1989,9 @@ int main(int argc, char* argv[])
 				gen_eot_i8(frame_symbols, &frame_buff_cnt);
 
 				//filter and send out to the device
-				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5, 0);
+				filter_symbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
 				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-				write(fd, (uint8_t*)bsb_chunk, sizeof(bsb_chunk));
+				write(fd, bsb_samples, sizeof(bsb_samples));
 
 				time(&rawtime);
 				timeinfo=localtime(&rawtime);
