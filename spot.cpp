@@ -1024,7 +1024,7 @@ void CCC1200::Run()
 				//printMsg(TERM_YELLOW, "%.3u %6.2f %6.2f %6.2f\n", ii, sed_lsf, sed_pkt, sed_str);
 
 				//LSF received at idle state
-				if(sed_lsf<=4.5f && rx_state==RX_IDLE)
+				if(sed_lsf<=22.25f && rx_state==RX_IDLE)
 				{
 					//find minimum
 					uint8_t sample_offset = 0;
@@ -1105,7 +1105,7 @@ void CCC1200::Run()
 				}
 
 				//stream frame received
-				else if(sed_str <= 5.0f)
+				else if(sed_str <= 25.0f)
 				{
 					rx_state = RX_SYNCD;
 					sample_cnt = 0;		//reset rx timeout timer
@@ -1218,7 +1218,7 @@ void CCC1200::Run()
 				}
 
 				//TODO: handle packet mode reception over RF
-				else if(sed_pkt <= 5.0f && rx_state == RX_SYNCD)
+				else if(sed_pkt <= 25.0f && rx_state == RX_SYNCD)
 				{
 					//find L2's minimum
 					uint8_t sample_offset = 0;
