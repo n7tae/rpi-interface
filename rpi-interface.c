@@ -1394,7 +1394,7 @@ int main(int argc, char* argv[])
 				//fwrite(&dist_str, 4, 1, fp);
 
 				//LSF received at idle state
-				if(dist_lsf<=4.5f && rx_state==RX_IDLE)
+				if(dist_lsf<=22.5f && rx_state==RX_IDLE)
 				{
 					//find L2's minimum
 					uint8_t sample_offset=0;
@@ -1479,7 +1479,7 @@ int main(int argc, char* argv[])
 				}
 
 				//stream frame received
-				else if(dist_str<=5.0f)
+				else if(dist_str<=25.0f)
 				{
 					rx_state=RX_SYNCD;
 					sample_cnt=0;		//reset rx timeout timer
@@ -1603,7 +1603,7 @@ int main(int argc, char* argv[])
 				}
 
 				//TODO: handle packet mode reception over RF
-				else if(dist_pkt<=5.0f && rx_state==RX_SYNCD)
+				else if(dist_pkt<=25.0f && rx_state==RX_SYNCD)
 				{
 					//find L2's minimum
 					uint8_t sample_offset=0;
