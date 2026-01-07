@@ -38,8 +38,6 @@
 
 #include "term.h" //colored terminal font
 
-#define MAX_UDP_LEN				65535
-
 #define RX_SYMBOL_SCALING_COEFF	(1.0f/(0.8f/(40.0e3f/2097152*0xAD)*130.0f))
 // CC1200 User's Guide, p. 24
 // 0xAD is `DEVIATION_M`, 2097152=2^21
@@ -1050,8 +1048,7 @@ void CCC1200::Run()
 						last_fn=0xFFFFU;
 
 						printMsg(TERM_GREEN, "LSF ");
-						printMsg(TERM_YELLOW, "DST: %s SRC: %-9s TYPE: %04X (CAN=%d) DIST: %4.2f MER: %-3.1f%%\n", call_dst, call_src, type, can, sqrtf(sed_lsf), float(e)*escale);
-						// error rate scaling (%): 100/0xffffu/SYM_PER_PLD/2 = 6.32711275e-10
+						printMsg(TERM_YELLOW, "DST: %-9s SRC: %-9s TYPE: %04X (CAN=%d) DIST^2: %4.2f MER: %-3.1f%%\n", call_dst, call_src, type, can, sed_lsf, float(e)*escale);
 						if(type&1) //if stream
 						{
 							m17stream.fn=0;
@@ -1173,8 +1170,8 @@ void CCC1200::Run()
 						}
 
 						timeStamp();
-						printMsg(TERM_YELLOW, " RF FRM: ");
-						printMsg(TERM_YELLOW, "FN:%04X LICH_CNT:%d DIST:%5.2f MER:%4.1f%%\n", fn, lich_cnt, sqrtf(sed_str), float(e)*escale);
+						printMsg(TERM_YELLOW, "RF FRM: ");
+						printMsg(TERM_YELLOW, "FN:%04X LICH_CNT:%d DIST^2:%5.2f MER:%4.1f%%\n", fn, lich_cnt, sed_str, float(e)*escale);
 
 						if(got_lsf)
 						{
