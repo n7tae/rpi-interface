@@ -57,8 +57,12 @@ private:
 	bool stopRx(void);
 	float sed(const float *v1, const int8_t *v2, const unsigned len) const;
 	void filterSymbols(int8_t* __restrict out, const int8_t* __restrict in, const float* __restrict flt, uint8_t phase_inv);
+	void processRfFrame(int8_t *frame);
+	void processIpPacket(void);
 
 	int fd = -1; // the handle to the CC1200
+	uint32_t tx_timer = 0;
+
 	// gpiod pointers
 	struct gpiod_chip *gpio_chip = nullptr;
 	struct gpiod_line_request *boot0_line = nullptr;
