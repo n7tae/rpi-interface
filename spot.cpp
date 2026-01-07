@@ -878,19 +878,17 @@ void CCC1200::Stop()
 void CCC1200::Run()
 {
 	//UART comms
-	bool uart_rx_sync = false;
 	bool uart_rx_data_valid = false;
 	bool got_lsf = false;
 	bool first_frame = true;
 	int8_t rx_bsb_sample = 0;
 	int8_t raw_bsb_rx[960];
-	uint8_t rx_samp_buff[1024] { 0 };
 	uint8_t lsf_b[30];
 	uint8_t lich_parts = 0;
 	uint16_t fn;
 	uint16_t sample_cnt = 0;
-	uint16_t rx_buff_cnt = 0;
 	uint16_t last_fn = 0xffffu;
+	RingBuffer<uint8_t, 3> rx_header;
 	RingBuffer<int8_t, 41> flt_buff;
 	RingBuffer<float, 2042> f_flt_buff;
 	// why 2042? 8*5+2*(8*5+4800/25*5)+2 = 2042
@@ -946,37 +944,19 @@ void CCC1200::Run()
 				break;
 			}
 
-			//wait for rx baseband data header
-			if (!uart_rx_sync)
-			{
-				rx_samp_buff[0] = rx_samp_buff[1];
-				rx_samp_buff[1] = rx_samp_buff[2];
-				rx_samp_buff[2] = rx_bsb_sample;
+			rx_header.Push(rx_bsb_sample);
 
-				if (rx_samp_buff[0]==CMD_RX_DATA && rx_samp_buff[1]==0xC3 && rx_samp_buff[2]==0x03)
-				{
-					uart_rx_sync = true;
-					rx_buff_cnt = 3;
-				}
-			}
-			else
+			if (rx_header[0]==CMD_RX_DATA and rx_header[1]==0xC3 and rx_header[2]==0x03)
 			{
-				rx_samp_buff[rx_buff_cnt++] = rx_bsb_sample;
-			}
-
-			if (uart_rx_sync && rx_buff_cnt>=963)
-			{
-				//printMsg(TERM_YELLOW, "Baseband packet received\n");
-				memcpy(raw_bsb_rx, &rx_samp_buff[3], sizeof(raw_bsb_rx));
-				memset(rx_samp_buff, 0, sizeof(rx_samp_buff));
+				readDev(raw_bsb_rx, 960);
 				uart_rx_data_valid = true;
-				uart_rx_sync = false;
-				rx_buff_cnt = 0;
 			}
 		}
 
 		if (uart_rx_data_valid)
 		{
+			// we can clear this right away
+			uart_rx_data_valid = false;
 			for (uint16_t ii=0; ii<960; ii++)
 			{
 				//push the next sample into the buffer
@@ -1303,8 +1283,6 @@ void CCC1200::Run()
 					}
 				}
 			}
-			//all data has been used
-			uart_rx_data_valid = false;
 		}
 
 		//receive a packet - blocking
