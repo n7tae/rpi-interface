@@ -143,7 +143,7 @@ void CCC1200::printMsg(const char* color_code, const char* fmt, ...)
 	{
 		fputs(color_code, stdout);
 		fputs(str, stdout);
-		fputs(TERM_DEFAULT, stdout);
+		fputs(TC_DEFAULT, stdout);
 	}
 	else
 	{
@@ -157,7 +157,7 @@ void CCC1200::timeStamp()
 	struct timeval now;
 	gettimeofday(&now, nullptr);
 	struct tm* tm = ::localtime(&now.tv_sec);
-	printMsg(TERM_SKYBLUE, "[%02d/%02d %02d:%02d:%02d.%03lld] ", tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, now.tv_usec / 1000LL);
+	printMsg(TC_CYAN, "[%02d/%02d %02d:%02d:%02d.%03lld] ", tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, now.tv_usec / 1000LL);
 }
 
 uint32_t CCC1200::getMS(void)
@@ -227,14 +227,14 @@ bool CCC1200::setAttributes(unsigned speed, int parity)
 	struct termios tty;
 	if(tcgetattr(fd, &tty))
 	{
-		printMsg(TERM_RED, "tcgetattr() error: %s\n", strerror(errno));
+		printMsg(TC_RED, "tcgetattr() error: %s\n", strerror(errno));
 		return true;
  	}
 
 	auto baud = getBaud(speed);
 	if (B0 == baud)
 	{
-		printMsg(TERM_YELLOW, "%u is not a valid baud rate, trying 460800 ", speed);
+		printMsg(TC_YELLOW, "%u is not a valid baud rate, trying 460800 ", speed);
 		baud = B460800;
 	}
 	cfsetospeed(&tty, baud);
@@ -261,7 +261,7 @@ bool CCC1200::setAttributes(unsigned speed, int parity)
 
 	if(tcsetattr(fd, TCSANOW, &tty))
 	{		
-		printMsg(TERM_RED, " tcsetattr() error: %s\n", strerror(errno));
+		printMsg(TC_RED, " tcsetattr() error: %s\n", strerror(errno));
 		return true; 
 	}
 	
@@ -302,20 +302,20 @@ struct gpiod_line_request *CCC1200::gpioLineRequest(unsigned offset, int value, 
 	settings = gpiod_line_settings_new();
 	if (nullptr == settings)
 	{
-		printMsg(TERM_RED, "Could not create settings for gpio line #%u\n", offset);
+		printMsg(TC_RED, "Could not create settings for gpio line #%u\n", offset);
 	} else {
 		if (gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_OUTPUT) or gpiod_line_settings_set_output_value(settings, value ? GPIOD_LINE_VALUE_ACTIVE : GPIOD_LINE_VALUE_INACTIVE))
 		{
-			printMsg(TERM_RED, "Could not adjust settings for gpio line #%u\n", offset);
+			printMsg(TC_RED, "Could not adjust settings for gpio line #%u\n", offset);
 		} else {
 			line_cfg = gpiod_line_config_new();
 			if (nullptr == line_cfg)
 			{
-				printMsg(TERM_RED, "Could not create new config for gpio line #%u\n", offset);
+				printMsg(TC_RED, "Could not create new config for gpio line #%u\n", offset);
 			} else {
 				if (gpiod_line_config_add_line_settings(line_cfg, &offset, 1, settings))
 				{
-					printMsg(TERM_RED, "could not add settings to config of gpio line #%u\n", offset);
+					printMsg(TC_RED, "could not add settings to config of gpio line #%u\n", offset);
 				} else {
 					req_cfg = gpiod_request_config_new();
 					if (req_cfg)
@@ -323,7 +323,7 @@ struct gpiod_line_request *CCC1200::gpioLineRequest(unsigned offset, int value, 
 						gpiod_request_config_set_consumer(req_cfg, (not consumer) ? "SPOT" : consumer);
 						request = gpiod_chip_request_lines(gpio_chip, req_cfg, line_cfg);
 						if (nullptr == request)
-							printMsg(TERM_RED, "Could not open offset %u on configured gpio device\n", offset);
+							printMsg(TC_RED, "Could not open offset %u on configured gpio device\n", offset);
 					}
 				}
 			}
@@ -349,13 +349,13 @@ bool CCC1200::gpioSetValue(unsigned offset, int value)
 	else if (config.nrst == offset)
 		lr = nrst_line;
 	else {
-		printMsg(TERM_RED, "gpioSetValue error: offset %u not confiugred\n", offset);
+		printMsg(TC_RED, "gpioSetValue error: offset %u not confiugred\n", offset);
 		return true;
 	}
 
 	if (gpiod_line_request_set_value(lr, offset, value ? GPIOD_LINE_VALUE_ACTIVE : GPIOD_LINE_VALUE_INACTIVE))
 	{
-		printMsg(TERM_RED, "Could not set gpio line #%u to %d\n", offset, value);
+		printMsg(TC_RED, "Could not set gpio line #%u to %d\n", offset, value);
 		return true;
 	}
 	return false;
@@ -366,9 +366,9 @@ bool CCC1200::gpioInit(const std::string &consumer)
 	const char *chip = "/dev/gpiochip0";
 	gpio_chip = gpiod_chip_open(chip);
 	if (gpio_chip) {
-		printMsg(TERM_GREEN, "%s opened\n", chip);
+		printMsg(TC_GREEN, "%s opened\n", chip);
 	} else {
-		printMsg(TERM_RED, "Could not open %s\n", chip);
+		printMsg(TC_RED, "Could not open %s\n", chip);
 		return true;
 	}
 	boot0_line = gpioLineRequest(config.boot0, 0, consumer.c_str());
@@ -393,10 +393,10 @@ void CCC1200::gpioCleanup()
 		gpioSetValue(config.nrst, 0);
 		gpiod_line_request_release(nrst_line);
 	}
-	printMsg(TERM_GREEN, "GPIO lines set to low\n");
+	printMsg(TC_GREEN, "GPIO lines set to low\n");
 	if (gpio_chip)
 		gpiod_chip_close(gpio_chip);
-	printMsg(TERM_GREEN, "GPIO resources released\n");
+	printMsg(TC_GREEN, "GPIO resources released\n");
 }
 
 //M17 stuff
@@ -418,10 +418,10 @@ bool CCC1200::readDev(void *vbuf, int size)
 	{
 		int r = read(fd, buf + rd, size - rd);
 		if (r < 0) {
-			printMsg(TERM_RED, "read() %s returned error: %s", config.uart, strerror(errno));
+			printMsg(TC_RED, "read() %s returned error: %s", config.uart, strerror(errno));
 			return true;
 		} else if (r == 0) {
-			printMsg(TERM_RED, "read() %s returned zero bytes\n", config.uart);
+			printMsg(TC_RED, "read() %s returned zero bytes\n", config.uart);
 			return true;
 		}
 		rd += r;
@@ -433,9 +433,9 @@ void CCC1200::writeDev(void *buf, int size, const char *where)
 {
 	ssize_t n = write(fd, buf, size);
 	if (n < 0) {
-		printMsg(TERM_YELLOW, "In %s, write() error: %s\n", where, strerror(errno));
+		printMsg(TC_YELLOW, "In %s, write() error: %s\n", where, strerror(errno));
 	} else if (n != size) {
-		printMsg(TERM_YELLOW, "write() only wrote %d of %d in %s\n", n, size, where);
+		printMsg(TC_YELLOW, "write() only wrote %d of %d in %s\n", n, size, where);
 	}
 	return;
 }
@@ -463,13 +463,13 @@ bool CCC1200::pingDev()
 	const uint8_t good[7] { cid, 7, 0, 0, 0, 0, 0 };
     if (0 == memcmp(resp, good, 7))
 	{
-		printMsg(TERM_GREEN, "PONG OK\n"); //OK
+		printMsg(TC_GREEN, "PONG OK\n"); //OK
         return false;
     }
 
 	uint32_t dev_err;
 	memcpy((uint8_t*)&dev_err, &resp[3], sizeof(uint32_t));
-    printMsg(TERM_RED, "%02x %02x %02x PONG error code: 0x%04X\n", resp[0], resp[1], resp[2], dev_err);
+    printMsg(TC_RED, "%02x %02x %02x PONG error code: 0x%04X\n", resp[0], resp[1], resp[2], dev_err);
     return true;
 }
 
@@ -497,11 +497,11 @@ bool CCC1200::setRxFreq(uint32_t freq)
     if (0 == memcmp(resp, good, 4))
 	{
 		printMsg(0, "RX frequency: ");
-		printMsg(TERM_GREEN, "%lu Hz\n", freq); //OK
+		printMsg(TC_GREEN, "%lu Hz\n", freq); //OK
         return false;
     }
 
-    printMsg(TERM_RED, "Error %d setting RX frequency: %u Hz\n", resp[3], freq); //error
+    printMsg(TC_RED, "Error %d setting RX frequency: %u Hz\n", resp[3], freq); //error
     return true;
 }
 
@@ -529,11 +529,11 @@ bool CCC1200::setTxFreq(uint32_t freq)
     if (0 == memcmp(resp, good, 4))
 	{
 		printMsg(0, "TX frequency: ");
-		printMsg(TERM_GREEN, "%lu Hz\n", freq); //OK
+		printMsg(TC_GREEN, "%lu Hz\n", freq); //OK
         return false;
     }
 
-    printMsg(TERM_RED, "Error %d setting TX frequency: %u Hz\n", resp[3], freq); //error
+    printMsg(TC_RED, "Error %d setting TX frequency: %u Hz\n", resp[3], freq); //error
     return true;
 }
 
@@ -560,11 +560,11 @@ bool CCC1200::setFreqCorr(int16_t corr)
     if (0 == memcmp(resp, good, 4))
 	{
 		printMsg(0, "Frequency correction: ");
-		printMsg(TERM_GREEN, "%d\n", corr); //OK
+		printMsg(TC_GREEN, "%d\n", corr); //OK
         return false;
     }
 
-    printMsg(TERM_RED, "Error %d setting frequency correction: %d\n", resp[3], corr); //error
+    printMsg(TC_RED, "Error %d setting frequency correction: %d\n", resp[3], corr); //error
     return true;
 }
 
@@ -591,11 +591,11 @@ bool CCC1200::setAfc(bool en)
     if (0 == memcmp(resp, good, 4))
 	{
 		printMsg(0, "AFC: ");
-		printMsg(TERM_GREEN, "%s\n", en==0?"disabled":"enabled"); //OK
+		printMsg(TC_GREEN, "%s\n", en==0?"disabled":"enabled"); //OK
         return false;
     }
 
-    printMsg(TERM_RED, "Error setting AFC\n"); //error
+    printMsg(TC_RED, "Error setting AFC\n"); //error
     return true;
 }
 
@@ -622,11 +622,11 @@ bool CCC1200::setTxPower(float power) //powr in dBm
     if (0 == memcmp(resp, good, 4))
 	{
 		printMsg(0, "TX power: ");
-		printMsg(TERM_GREEN, "%2.2f dBm\n", power); //OK
+		printMsg(TC_GREEN, "%2.2f dBm\n", power); //OK
         return false;
     }
 
-    printMsg(TERM_RED, "Error %d setting TX power: %2.2f dBm\n", resp[3], power); //error
+    printMsg(TC_RED, "Error %d setting TX power: %2.2f dBm\n", resp[3], power); //error
     return true;
 }
 
@@ -651,7 +651,7 @@ bool CCC1200::txrxControl(uint8_t cid, uint8_t onoff, const char *what)
 	const uint8_t good[3] { cid, 4, 0 };
 	if (memcmp(resp, good, 3) or (ERR_OK != resp[3] and ERR_NOP != resp[3]))
 	{
-		printMsg(TERM_RED, "Doing %s, cmd returned %02x %02x %02x %02x\n", what, resp[0], resp[1], resp[2], resp[3]);
+		printMsg(TC_RED, "Doing %s, cmd returned %02x %02x %02x %02x\n", what, resp[0], resp[1], resp[2], resp[3]);
 		return true;
 	}
 
@@ -661,28 +661,28 @@ bool CCC1200::txrxControl(uint8_t cid, uint8_t onoff, const char *what)
 bool CCC1200::startRx(void)
 {
 	timeStamp();
-	printMsg(TERM_YELLOW, "Starting Rx\n");
+	printMsg(TC_YELLOW, "Starting Rx\n");
 	return txrxControl(CMD_RX_START, 1, "startRx");
 }
 
 bool CCC1200::stopRx(void)
 {
 	timeStamp();
-	printMsg(TERM_YELLOW, "Stopping Rx\n");
+	printMsg(TC_YELLOW, "Stopping Rx\n");
 	return txrxControl(CMD_RX_START, 0, "stopRx");
 }
 
 bool CCC1200::startTx(void)
 {
 	timeStamp();
-	printMsg(TERM_YELLOW, "Starting Tx\n");
+	printMsg(TC_YELLOW, "Starting Tx\n");
 	return txrxControl(CMD_TX_START, 1, "startTx");
 }
 
 bool CCC1200::stopTx(void)
 {
 	timeStamp();
-	printMsg(TERM_YELLOW, "Stopping Tx\n");
+	printMsg(TC_YELLOW, "Stopping Tx\n");
 	return txrxControl(CMD_TX_START, 0, "stopTx");
 }
 
@@ -763,7 +763,7 @@ void CCC1200::filterSymbols(int8_t* __restrict out, const int8_t* __restrict in,
 bool CCC1200::Start()
 {
 	srand(time(nullptr));
-	printMsg(TERM_GREEN, "Starting up spot\n");
+	printMsg(TC_GREEN, "Starting up spot\n");
 
 	//check write access to the log file
 	if(strlen(config.log_path) > 0)
@@ -775,14 +775,14 @@ bool CCC1200::Start()
 		}
 		else
 		{
-			printMsg(TERM_RED, "Cannot access %s\nExiting\n", config.log_path);
+			printMsg(TC_RED, "Cannot access %s\nExiting\n", config.log_path);
 			return true;
 		}
 	}
 	else
 	{
 		printMsg(0, "Traffic logging ");
-		printMsg(TERM_GREEN, "disabled\n");
+		printMsg(TC_GREEN, "disabled\n");
 	}
 
 	//------------------------------------gpio init------------------------------------
@@ -795,20 +795,20 @@ bool CCC1200::Start()
 	if (gpioSetValue(config.nrst, 1))
 		return true;
 	usleep(1000000U); //1s for device boot-up
-	printMsg(TERM_GREEN, " OK\n");
+	printMsg(TC_GREEN, " OK\n");
 
 	//-----------------------------------device part-----------------------------------
 	printMsg(0, "UART init: %s at %d baud: ", (char*)config.uart, config.uart_rate);
 	fd = open((char*)config.uart, O_RDWR | O_NOCTTY | O_SYNC);
 	if(fd < 0)
 	{
-		printMsg(TERM_RED, "open(%s) error: %s\n", config.uart, strerror(errno));
+		printMsg(TC_RED, "open(%s) error: %s\n", config.uart, strerror(errno));
 		return true;
 	}
 	
 	if (setAttributes(config.uart_rate, 0))
 		return true;
-	printMsg(TERM_GREEN, " OK\n");
+	printMsg(TC_GREEN, " OK\n");
 
 	//PING-PONG test
 	printMsg(0, "Radio board's reply to PING... ");
@@ -837,7 +837,7 @@ bool CCC1200::Start()
 	sockt = socket(AF_INET, SOCK_DGRAM, 0);
 	if(sockt < 0)
 	{
-		printMsg(TERM_RED, "socket() error: %s\n", strerror(errno));
+		printMsg(TC_RED, "socket() error: %s\n", strerror(errno));
 		return true;
 	}
 	memset(&daddr, 0, sizeof(daddr));
@@ -849,7 +849,7 @@ bool CCC1200::Start()
 	sprintf((char*)tx_buff, "CONNxxxxxx%c", config.module);
 	memcpy(&tx_buff[4], config.enc_node, sizeof(config.enc_node));
 	refl_send(tx_buff, 4+6+1);
-	printMsg(TERM_GREEN, "OK\n");
+	printMsg(TC_GREEN, "OK\n");
 
 	//start RX
 	while (stopTx())
@@ -857,7 +857,7 @@ bool CCC1200::Start()
 	while (startRx())
 		usleep(40e3);
 	timeStamp();
-	printMsg(TERM_GREEN, "Device start - RX\n");
+	printMsg(TC_GREEN, "Device start - RX\n");
 	return false;
 }
 
@@ -869,7 +869,7 @@ void CCC1200::Stop()
 		fclose(logfile);
 	if (sockt)
 		close(sockt);
-	printMsg(TERM_GREEN, "All resources closed\n");
+	printMsg(TC_GREEN, "All resources closed\n");
 }
 
 #define FLOATBUFSIZE 2042
@@ -928,7 +928,7 @@ void CCC1200::Run()
 		if (sval < 0)
 		{
 			if (EINTR != errno)
-				printMsg(TERM_RED, "select() error: %s\n", strerror(errno));
+				printMsg(TC_RED, "select() error: %s\n", strerror(errno));
 			keep_running = false;
 			break;
 		}
@@ -985,20 +985,20 @@ void CCC1200::Run()
 				// if (sed_lsf < lmin) {
 				// 	lmin = sed_lsf;
 				// 	timeStamp();
-				// 	printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
+				// 	printMsg(TC_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
 				// }
 				// if (sed_str < smin) {
 				// 	smin = sed_str;
 				// 	timeStamp();
-				// 	printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
+				// 	printMsg(TC_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
 				// }
 				// if (sed_pkt < pmin) {
 				// 	pmin = sed_pkt;
 				// 	timeStamp();
-				// 	printMsg(TERM_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
+				// 	printMsg(TC_GREEN, "lmin=%6.2f smin=%6.2f pmin=%6.2f\n", lmin, smin, pmin);
 				// }
 
-				//printMsg(TERM_YELLOW, "%.3u %6.2f %6.2f %6.2f\n", ii, sed_lsf, sed_pkt, sed_str);
+				//printMsg(TC_YELLOW, "%.3u %6.2f %6.2f %6.2f\n", ii, sed_lsf, sed_pkt, sed_str);
 
 				//LSF received at idle state
 				if(sed_lsf<=22.25f && rx_state==RX_IDLE)
@@ -1037,7 +1037,7 @@ void CCC1200::Run()
 					crc=(((uint16_t)lsf.crc[0]<<8)|lsf.crc[1]);
 
 					timeStamp();
-					printMsg(TERM_YELLOW, " RF LSF:");
+					printMsg(TC_YELLOW, " RF LSF:");
 
 					if(LSF_CRC(&lsf)==crc) //if CRC valid
 					{
@@ -1047,8 +1047,8 @@ void CCC1200::Run()
 
 						last_fn=0xFFFFU;
 
-						printMsg(TERM_GREEN, "LSF ");
-						printMsg(TERM_YELLOW, "DST: %-9s SRC: %-9s TYPE: %04X (CAN=%d) DIST^2: %4.2f MER: %-3.1f%%\n", call_dst, call_src, type, can, sed_lsf, float(e)*escale);
+						printMsg(TC_GREEN, "LSF ");
+						printMsg(TC_YELLOW, "DST: %-9s SRC: %-9s TYPE: %04X (CAN=%d) DIST^2: %4.2f MER: %-3.1f%%\n", call_dst, call_src, type, can, sed_lsf, float(e)*escale);
 						if(type&1) //if stream
 						{
 							m17stream.fn=0;
@@ -1076,7 +1076,7 @@ void CCC1200::Run()
 					}
 					else
 					{
-						printMsg(TERM_RED, "CRC ERR\n");
+						printMsg(TC_RED, "CRC ERR\n");
 					}
 				}
 
@@ -1149,7 +1149,7 @@ void CCC1200::Run()
 									decode_callsign_bytes(call_src, &lsf_b[6]);
 
 									timeStamp();
-									printMsg(TERM_YELLOW, "LSF REC: DST:%-9s SRC:%-9s TYPE: %04X (CAN=%d)\n",
+									printMsg(TC_YELLOW, "LSF REC: DST:%-9s SRC:%-9s TYPE: %04X (CAN=%d)\n",
 										call_dst, call_src, type, can);
 
 									if(logfile)
@@ -1163,15 +1163,15 @@ void CCC1200::Run()
 								}
 								else
 								{
-									printMsg(TERM_YELLOW, "LSF CRC ERR\n");
+									printMsg(TC_YELLOW, "LSF CRC ERR\n");
 									lich_parts=0; //reset flags
 								}
 							}
 						}
 
 						timeStamp();
-						printMsg(TERM_YELLOW, "RF FRM: ");
-						printMsg(TERM_YELLOW, "FN:%04X LICH_CNT:%d DIST^2:%5.2f MER:%4.1f%%\n", fn, lich_cnt, sed_str, float(e)*escale);
+						printMsg(TC_YELLOW, "RF FRM: ");
+						printMsg(TC_YELLOW, "FN:%04X LICH_CNT:%d DIST^2:%5.2f MER:%4.1f%%\n", fn, lich_cnt, sed_str, float(e)*escale);
 
 						if(got_lsf)
 						{
@@ -1238,7 +1238,7 @@ void CCC1200::Run()
 						last_pkt_fn = pkt_fn;
 
 						timeStamp();
-						printMsg(TERM_YELLOW, " RF PKT: ");
+						printMsg(TC_YELLOW, " RF PKT: ");
 						/*for(uint8_t i=0; i<25; i++)
 							printMsg(0, "%02X ", pkt_frame_data[i]);
 						printMsg(0, "\n");*/
@@ -1251,9 +1251,9 @@ void CCC1200::Run()
 						time(&rawtime);
 						timeinfo=localtime(&rawtime);
 
-						printMsg(TERM_SKYBLUE, "[%02d:%02d:%02d]",
+						printMsg(TC_CYAN, "[%02d:%02d:%02d]",
 							timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-						printMsg(TERM_YELLOW, " refl_pld: ");
+						printMsg(TC_YELLOW, " refl_pld: ");
 						for(uint8_t i=0; i<sizeof(refl_pld); i++)
 							printMsg(0, "%02X ", refl_pld[i]);
 						printMsg(0, "\n");
@@ -1269,7 +1269,7 @@ void CCC1200::Run()
 					if(960*2 <= sample_cnt) // 80 ms without detecting anything in the sync'ed state
 					{
 						timeStamp();
-						printMsg(TERM_RED, "RF Timeout\n");
+						printMsg(TC_RED, "RF Timeout\n");
 						rx_state=RX_IDLE;
 						sample_cnt=0;
 						first_frame = true;
@@ -1298,7 +1298,7 @@ void CCC1200::Run()
 				sprintf((char*)tx_buff, "PONGxxxxxx"); //that "xxxxxx" is just a placeholder
 				memcpy(&tx_buff[4], config.enc_node, sizeof(config.enc_node));
 				refl_send(tx_buff, 4+6); //PONG
-				//printMsg(TERM_YELLOW, "PING\n");
+				//printMsg(TC_YELLOW, "PING\n");
 			}
 
 			//M17 stream frame data - "Steaming Mode IP Packet, Single Packet Method"
@@ -1374,7 +1374,7 @@ void CCC1200::Run()
 					}
 
 					timeStamp();
-					printMsg(TERM_GREEN, " Stream TX start\n");
+					printMsg(TC_GREEN, " Stream TX start\n");
 
 					//stop RX, set PA_EN=1 and initialize TX
 					while (stopRx())
@@ -1432,7 +1432,7 @@ void CCC1200::Run()
 					writeDev(bsb_samples, sizeof(bsb_samples), "SM EOT");
 
 					timeStamp();
-					printMsg(TERM_GREEN, " Stream TX end\n");
+					printMsg(TC_GREEN, " Stream TX end\n");
 					usleep(8*40e3); //wait 320ms (8 M17 frames) - let the transmitter consume all the buffered samples
 
 					//restart RX
@@ -1441,7 +1441,7 @@ void CCC1200::Run()
 					while (startRx())
 						usleep(40e3);
 					timeStamp();
-					printMsg(TERM_GREEN, " RX start\n");
+					printMsg(TC_GREEN, " RX start\n");
 
 					tx_state=TX_IDLE;
 				}
@@ -1451,7 +1451,7 @@ void CCC1200::Run()
 			else if(strstr((char*)rx_buff, "M17P")==(char*)rx_buff)
 			{
 				timeStamp();
-				printMsg(TERM_GREEN, " M17 Inet packet received\n");
+				printMsg(TC_GREEN, " M17 Inet packet received\n");
 
 				uint8_t call_dst[10], call_src[10], can, type;
 				decode_callsign_bytes(call_dst, &rx_buff[4+0]);
@@ -1459,17 +1459,17 @@ void CCC1200::Run()
 				can=(*((uint16_t*)&rx_buff[4+6+6])>>7)&0xF;
 				type=rx_buff[4+240/8];
 				
-				printMsg(TERM_DEFAULT, " ├ "); printMsg(TERM_YELLOW, "DST: "); printMsg(TERM_DEFAULT, "%s\n", call_dst);
-				printMsg(TERM_DEFAULT, " ├ "); printMsg(TERM_YELLOW, "SRC: "); printMsg(TERM_DEFAULT, "%s\n", call_src);
-				printMsg(TERM_DEFAULT, " ├ "); printMsg(TERM_YELLOW, "CAN: "); printMsg(TERM_DEFAULT, "%d\n", can);
+				printMsg(TC_DEFAULT, " ├ "); printMsg(TC_YELLOW, "DST: "); printMsg(TC_DEFAULT, "%s\n", call_dst);
+				printMsg(TC_DEFAULT, " ├ "); printMsg(TC_YELLOW, "SRC: "); printMsg(TC_DEFAULT, "%s\n", call_src);
+				printMsg(TC_DEFAULT, " ├ "); printMsg(TC_YELLOW, "CAN: "); printMsg(TC_DEFAULT, "%d\n", can);
 				if(type!=5) //assuming 1-byte type specifier
 				{
-					printMsg(TERM_DEFAULT, " └ "); printMsg(TERM_YELLOW, "TYPE: "); printMsg(TERM_DEFAULT, "%d\n", type);
+					printMsg(TC_DEFAULT, " └ "); printMsg(TC_YELLOW, "TYPE: "); printMsg(TC_DEFAULT, "%d\n", type);
 				}
 				else
 				{
-					printMsg(TERM_DEFAULT, " ├ "); printMsg(TERM_YELLOW, "TYPE: "); printMsg(TERM_DEFAULT, "SMS\n");
-					printMsg(TERM_DEFAULT, " └ "); printMsg(TERM_YELLOW, "MSG: ");  printMsg(TERM_DEFAULT, "%s\n", &rx_buff[4+240/8+1]);
+					printMsg(TC_DEFAULT, " ├ "); printMsg(TC_YELLOW, "TYPE: "); printMsg(TC_DEFAULT, "SMS\n");
+					printMsg(TC_DEFAULT, " └ "); printMsg(TC_YELLOW, "MSG: ");  printMsg(TC_DEFAULT, "%s\n", &rx_buff[4+240/8+1]);
 				}
 
 				//TODO: handle TX here
@@ -1485,7 +1485,7 @@ void CCC1200::Run()
 				}
 				
 				timeStamp();
-				printMsg(TERM_GREEN, " Packet TX start\n");
+				printMsg(TC_GREEN, " Packet TX start\n");
 
 				//stop RX, set PA_EN=1 and initialize TX
 				while (stopRx())
@@ -1554,7 +1554,7 @@ void CCC1200::Run()
 				writeDev(bsb_samples, sizeof(bsb_samples), "PM EOT");
 
 				timeStamp();
-				printMsg(TERM_GREEN, " PKT TX end\n");
+				printMsg(TC_GREEN, " PKT TX end\n");
 				usleep(3*40e3); //wait 120ms (3 M17 frames)
 
 				//restart RX
@@ -1563,7 +1563,7 @@ void CCC1200::Run()
 				while (startRx())
 					usleep(40e3);
 				timeStamp();
-				printMsg(TERM_GREEN, " RX start\n");
+				printMsg(TC_GREEN, " RX start\n");
 
 				tx_state = TX_IDLE;
 			}
@@ -1576,7 +1576,7 @@ void CCC1200::Run()
 		if(tx_state==TX_ACTIVE && (getMS()-tx_timer)>240) //240ms timeout
 		{
 			timeStamp();
-			printMsg(TERM_GREEN, " TX timeout\n");
+			printMsg(TC_GREEN, " TX timeout\n");
 			//usleep(10*40e3); //wait 400ms (10 M17 frames)
 
 			//restart RX
@@ -1585,7 +1585,7 @@ void CCC1200::Run()
 			while (startRx())
 				usleep(40e3);
 			timeStamp();
-			printMsg(TERM_GREEN, " RX start\n");
+			printMsg(TC_GREEN, " RX start\n");
 
 			tx_state=TX_IDLE;
 		}
@@ -1595,10 +1595,10 @@ void CCC1200::Run()
 		{
 			keep_running = false;
 			//for now, just cry about it and quit
-			printMsg(TERM_RED, "Lost connection with the reflector\nExiting");
+			printMsg(TC_RED, "Lost connection with the reflector\nExiting");
 		}
 	}
-	printMsg(TERM_GREEN, "run loop terminated\n");
+	printMsg(TC_GREEN, "run loop terminated\n");
 }
 
 /**
