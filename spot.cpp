@@ -52,8 +52,6 @@
 // 40.0e3 is F_TCXO in kHz
 // 64 is `CFM_TX_DATA_IN` register value for max. F_DEV
 
-static std::atomic<bool> keep_running = true;
-
 //internet
 struct sockaddr_in source, dest; 
 int sockt;
@@ -124,9 +122,7 @@ enum err_t
 	ERR_OTHER
 };
 
-//log traffic to file
-FILE* logfile = nullptr;
-
+std::atomic<bool> keep_running = true;
 time_t last_refl_ping;
 
 //debug printf
@@ -851,6 +847,25 @@ bool CCC1200::Start()
 	refl_send(tx_buff, 4+6+1);
 	printMsg(TC_GREEN, "OK\n");
 
+	txFuture = std::async(std::launch::async, &CCC1200::txProcess, this);
+	if (not txFuture.valid())
+	{
+		timeStamp();
+		printMsg(TC_RED, "Could not start Tx thread\n");
+		keep_running = false;
+		return true;
+	}
+	rxFuture = std::async(std::launch::async, &CCC1200::rxProcess, this);
+	{
+		if (not rxFuture.valid())
+		{
+			timeStamp();
+			printMsg(TC_RED, "Could not start RX thread\n");
+			keep_running = false;
+			return true;
+		}
+	}
+
 	//start RX
 	while (stopTx())
 		usleep(40e3);
@@ -864,6 +879,10 @@ bool CCC1200::Start()
 void CCC1200::Stop()
 {
 	keep_running = false;
+	if (rxFuture.valid())
+		rxFuture.get();
+	if (txFuture.valid())
+		txFuture.get();
 	gpioCleanup();
 	if (logfile)
 		fclose(logfile);
@@ -872,8 +891,354 @@ void CCC1200::Stop()
 	printMsg(TC_GREEN, "All resources closed\n");
 }
 
-#define FLOATBUFSIZE 2042
-void CCC1200::Run()
+void CCC1200::txProcess()
+{
+	uint32_t tx_timer = 0;
+	enum tx_state_t tx_state = TX_IDLE;
+
+	//file for debug data dumping
+	//FILE *fp=fopen("test_dump.bin", "wb");
+
+	last_refl_ping = time(nullptr);
+
+	fd_set rfds;
+	
+	while (keep_running)
+	{
+		FD_ZERO(&rfds);
+		FD_SET(sockt, &rfds);
+		struct timeval tv;
+		tv.tv_sec = 0;
+		tv.tv_usec = 40000;
+		//receive a packet - blocking
+		auto sval = select(sockt+1, &rfds, nullptr, nullptr, &tv);
+		if (sval < 0)
+		{
+			if (EINTR != errno)
+				printMsg(TC_RED, "select() error: %s\n", strerror(errno));
+			keep_running = false;
+			break;
+		}
+
+		if (FD_ISSET(sockt, &rfds))
+		{
+			auto bsize = sizeof(rx_buff);
+			rx_len = recvfrom(sockt, rx_buff, bsize, 0, (struct sockaddr*)&saddr, (socklen_t*)&saddr_size);
+
+			//debug
+			//printMsg(0, "Size:%d\nPayload:%s\n", rx_len, rx_buff);
+
+			//PING-PONG
+			if(strstr((char*)rx_buff, "PING")==(char*)rx_buff)
+			{
+				last_refl_ping = time(nullptr);
+				sprintf((char*)tx_buff, "PONGxxxxxx"); //that "xxxxxx" is just a placeholder
+				memcpy(&tx_buff[4], config.enc_node, sizeof(config.enc_node));
+				refl_send(tx_buff, 4+6); //PONG
+				//printMsg(TC_YELLOW, "PING\n");
+			}
+
+			//M17 stream frame data - "Steaming Mode IP Packet, Single Packet Method"
+			else if(strstr((char*)rx_buff, "M17 ")==(char*)rx_buff)
+			{
+				tx_timer = getMS();
+
+				m17stream.sid=((uint16_t)rx_buff[4]<<8)|rx_buff[5];
+				m17stream.fn=((uint16_t)rx_buff[34]<<8)|rx_buff[35];
+				static uint8_t dst_call[10]={0};
+				static uint8_t src_call[10]={0};
+				memcpy(m17stream.pld, &rx_buff[(32+16+224+16)/8U], 16);
+
+				int8_t frame_symbols[SYM_PER_FRA];						//raw frame symbols
+				int8_t bsb_samples[963] = {CMD_TX_DATA, -61, 3};	//baseband samples wrapped in a frame
+
+				if(tx_state==TX_IDLE) //first received frame
+				{
+					tx_state=TX_ACTIVE;
+
+					//TODO: this needs to happen every time a new transmission appears
+					//stopRx();
+					//printMsg(0, "RX stop\n");
+					usleep(10e3);
+
+					//extract data
+					memcpy(m17stream.lsf.dst, "\xFF\xFF\xFF\xFF\xFF\xFF", 6);
+					memcpy(m17stream.lsf.src, &rx_buff[6+6], 6);
+					decode_callsign_bytes(dst_call, m17stream.lsf.dst);
+					decode_callsign_bytes(src_call, m17stream.lsf.src);
+
+					//set TYPE field
+					memcpy(m17stream.lsf.type, &rx_buff[18], 2);
+					m17stream.lsf.type[1]|=0x2U<<5; //no encryption, so the subtype field defines the META field contents: extended callsign data
+
+					//generate META field
+					//remove trailing spaces and suffixes
+					uint8_t trimmed_src[10], enc_trimmed_src[6];
+					for(uint8_t i=0; i<10; i++)
+					{
+						if(src_call[i]!=' ')
+							trimmed_src[i]=src_call[i];
+						else
+						{
+							trimmed_src[i]=0;
+							break;
+						}
+					}
+					encode_callsign_bytes(enc_trimmed_src, trimmed_src);
+
+					uint8_t ext_ref[12], enc_ext_ref[6];
+					sprintf((char*)ext_ref, "%s %c", config.reflector, config.module);
+					encode_callsign_bytes(enc_ext_ref, ext_ref);
+
+					memcpy(&m17stream.lsf.meta[0], m17stream.lsf.src, 6); //originator
+					memcpy(&m17stream.lsf.meta[6], enc_ext_ref, 6); //reflector
+					memset(&m17stream.lsf.meta[12], 0, 2);
+					memcpy(m17stream.lsf.src, enc_trimmed_src, 6);
+
+					//append CRC
+					uint16_t ccrc=LSF_CRC(&m17stream.lsf);
+					m17stream.lsf.crc[0]=ccrc>>8;
+					m17stream.lsf.crc[1]=ccrc&0xFF;
+
+					//log to file
+					if(logfile)
+					{
+						const auto rawtime = time(nullptr);
+						const auto timeinfo=localtime(&rawtime);
+						fprintf(logfile, "\"%02d:%02d:%02d\" \"%s\" \"%s\" \"Internet\" \"--\" \"--\"\n",
+							timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec,
+							src_call, dst_call);
+					}
+
+					timeStamp();
+					printMsg(TC_GREEN, " Stream TX start\n");
+
+					//stop RX, set PA_EN=1 and initialize TX
+					while (stopRx())
+						usleep(40e3);
+					usleep(2e3);
+					while (startTx())
+						usleep(40e3);
+					usleep(10e3);
+
+					//flush the RRC baseband filter
+					filterSymbols(nullptr, nullptr, nullptr, 0);
+				
+					//generate frame symbols, filter them and send out to the device
+					//we need to prepare 3 frames to begin the transmission - preamble, LSF and stream frame 0
+					//let's start with the preamble
+					uint32_t frame_buff_cnt=0;
+					gen_preamble_i8(frame_symbols, &frame_buff_cnt, PREAM_LSF);
+
+					//filter and send out to the device
+					filterSymbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
+					writeDev(bsb_samples, sizeof(bsb_samples), "SM Pream");
+
+					//now the LSF
+					gen_frame_i8(frame_symbols, nullptr, FRAME_LSF, &(m17stream.lsf), 0, 0);
+
+					//filter and send out to the device
+					filterSymbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
+					writeDev(bsb_samples, sizeof(bsb_samples), "SM LSF");
+
+					//finally, the first frame
+					gen_frame_i8(frame_symbols, m17stream.pld, FRAME_STR, &(m17stream.lsf), (m17stream.fn&0x7FFFU)%6, m17stream.fn);
+
+					//filter and send out to the device
+					filterSymbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
+					writeDev(bsb_samples, sizeof(bsb_samples), "SM first Frame");
+				}
+				else
+				{
+					//only one frame is needed
+					gen_frame_i8(frame_symbols, m17stream.pld, FRAME_STR, &(m17stream.lsf), (m17stream.fn&0x7FFFU)%6, m17stream.fn);
+
+					//filter and send out to the device
+					filterSymbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
+					writeDev(bsb_samples, sizeof(bsb_samples), "SM Frame");
+				}
+
+				if(m17stream.fn&0x8000U) //last stream frame
+				{
+					//send the final EOT marker
+					uint32_t frame_buff_cnt=0;
+					gen_eot_i8(frame_symbols, &frame_buff_cnt);
+
+					//filter and send out to the device
+					filterSymbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
+					writeDev(bsb_samples, sizeof(bsb_samples), "SM EOT");
+
+					timeStamp();
+					printMsg(TC_GREEN, " Stream TX end\n");
+					usleep(8*40e3); //wait 320ms (8 M17 frames) - let the transmitter consume all the buffered samples
+
+					//restart RX
+					while (stopTx())
+						usleep(40e3);
+					while (startRx())
+						usleep(40e3);
+					timeStamp();
+					printMsg(TC_GREEN, " RX start\n");
+
+					tx_state=TX_IDLE;
+				}
+			}
+
+			//M17 packet data - "Packet Mode IP Packet"
+			else if(strstr((char*)rx_buff, "M17P")==(char*)rx_buff)
+			{
+				timeStamp();
+				printMsg(TC_GREEN, " M17 Inet packet received\n");
+
+				uint8_t call_dst[10], call_src[10], can, type;
+				decode_callsign_bytes(call_dst, &rx_buff[4+0]);
+				decode_callsign_bytes(call_src, &rx_buff[4+6]);
+				can=(*((uint16_t*)&rx_buff[4+6+6])>>7)&0xF;
+				type=rx_buff[4+240/8];
+				
+				printMsg(TC_DEFAULT, " ├ "); printMsg(TC_YELLOW, "DST: "); printMsg(TC_DEFAULT, "%s\n", call_dst);
+				printMsg(TC_DEFAULT, " ├ "); printMsg(TC_YELLOW, "SRC: "); printMsg(TC_DEFAULT, "%s\n", call_src);
+				printMsg(TC_DEFAULT, " ├ "); printMsg(TC_YELLOW, "CAN: "); printMsg(TC_DEFAULT, "%d\n", can);
+				if(type!=5) //assuming 1-byte type specifier
+				{
+					printMsg(TC_DEFAULT, " └ "); printMsg(TC_YELLOW, "TYPE: "); printMsg(TC_DEFAULT, "%d\n", type);
+				}
+				else
+				{
+					printMsg(TC_DEFAULT, " ├ "); printMsg(TC_YELLOW, "TYPE: "); printMsg(TC_DEFAULT, "SMS\n");
+					printMsg(TC_DEFAULT, " └ "); printMsg(TC_YELLOW, "MSG: ");  printMsg(TC_DEFAULT, "%s\n", &rx_buff[4+240/8+1]);
+				}
+
+				//TODO: handle TX here
+				int8_t frame_symbols[SYM_PER_FRA];						//raw frame symbols
+				int8_t bsb_samples[SYM_PER_FRA*5];						//filtered baseband samples = symbols*sps
+				uint8_t bsb_chunk[963] = {CMD_TX_DATA, 0xC3, 0x03};		//baseband samples wrapped in a frame
+
+				if(logfile)
+				{
+					const auto rawtime = time(nullptr);
+					const auto timeinfo=localtime(&rawtime);
+					fprintf(logfile, "\"%02d:%02d:%02d\" \"%s\" \"%s\" \"Internet\" \"--\" \"--\"\n", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec, call_src, call_dst);
+				}
+				
+				timeStamp();
+				printMsg(TC_GREEN, " Packet TX start\n");
+
+				//stop RX, set PA_EN=1 and initialize TX
+				while (stopRx())
+					usleep(40e3);
+				usleep(2e3);
+
+				while (startTx())
+					usleep(40e3);
+				usleep(10e3);
+				
+				//flush the RRC baseband filter
+				filterSymbols(nullptr, nullptr, nullptr, 0);
+				
+				//generate frame symbols, filter them and send out to the device
+				//we need to prepare 3 frames to begin the transmission - preamble, LSF and stream frame 0
+				//let's start with the preamble
+				uint32_t frame_buff_cnt=0;
+				gen_preamble_i8(frame_symbols, &frame_buff_cnt, PREAM_LSF);
+				
+				//filter and send out to the device
+				filterSymbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
+				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+				writeDev(bsb_samples, sizeof(bsb_samples), "PM LSF Pream");
+				
+				//now the LSF
+				gen_frame_i8(frame_symbols, nullptr, FRAME_LSF, (lsf_t*)&rx_buff[4], 0, 0);
+				
+				//filter and send out to the device
+				filterSymbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
+				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+				writeDev(bsb_samples, sizeof(bsb_samples), "PM LSF");
+				
+				//packet frames
+				uint16_t pld_len=rx_len-(4+240/8); //"M17P" plus 240-bit LSD
+				uint8_t frame=0;
+				uint8_t pld[26];
+				
+				while(pld_len>25)
+				{
+					memcpy(pld, &rx_buff[4+240/8+frame*25], 25);
+					pld[25]=frame<<2;
+					gen_frame_i8(frame_symbols, pld, FRAME_PKT, nullptr, 0, 0);
+					filterSymbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
+					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+					writeDev(bsb_samples, sizeof(bsb_samples), "PM Frame");
+					pld_len-=25;
+					frame++;
+					usleep(40*1000U);
+				}
+				memset(pld, 0, 26);
+				memcpy(pld, &rx_buff[4+240/8+frame*25], pld_len);
+				pld[25]=(1<<7)|(pld_len<<2); //EoT flag set, amount of remaining data in the 'frame number' field
+				gen_frame_i8(frame_symbols, pld, FRAME_PKT, nullptr, 0, 0);
+				filterSymbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
+				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+				writeDev(bsb_samples, sizeof(bsb_samples), "PM Frame");
+				usleep(40*1000U);
+
+				//now the final EOT marker
+				frame_buff_cnt=0;
+				gen_eot_i8(frame_symbols, &frame_buff_cnt);
+
+				//filter and send out to the device
+				filterSymbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
+				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
+				writeDev(bsb_samples, sizeof(bsb_samples), "PM EOT");
+
+				timeStamp();
+				printMsg(TC_GREEN, " PKT TX end\n");
+				usleep(3*40e3); //wait 120ms (3 M17 frames)
+
+				//restart RX
+				while (stopTx())
+					usleep(40e3);
+				while (startRx())
+					usleep(40e3);
+				timeStamp();
+				printMsg(TC_GREEN, " RX start\n");
+
+				tx_state = TX_IDLE;
+			}
+
+			//clear the rx_buff
+			memset((uint8_t*)rx_buff, 0, rx_len);
+		}
+
+		//tx timeout
+		if(tx_state==TX_ACTIVE && (getMS()-tx_timer)>240) //240ms timeout
+		{
+			timeStamp();
+			printMsg(TC_GREEN, " TX timeout\n");
+			//usleep(10*40e3); //wait 400ms (10 M17 frames)
+
+			//restart RX
+			while (stopTx())
+				usleep(40e3);
+			while (startRx())
+				usleep(40e3);
+			timeStamp();
+			printMsg(TC_GREEN, " RX start\n");
+
+			tx_state=TX_IDLE;
+		}
+
+		//connection with the reflector borken
+		if(time(nullptr)-last_refl_ping>30)
+		{
+			keep_running = false;
+			//for now, just cry about it and quit
+			printMsg(TC_RED, "Lost connection with the reflector\nExiting");
+		}
+	}
+	printMsg(TC_GREEN, "Tx loop terminated\n");
+}
+
+void CCC1200::rxProcess()
 {
 	//UART comms
 	bool uart_rx_data_valid = false;
@@ -900,13 +1265,10 @@ void CCC1200::Run()
 	lsf_t lsf;
 
 	enum rx_state_t rx_state = RX_IDLE;
-	float f_sample;
 
 	// for packets
 	uint8_t last_pkt_fn = 0xffu;
 	uint8_t pkt_fn;
-	uint32_t tx_timer = 0;
-	enum tx_state_t tx_state = TX_IDLE;
 
 	//file for debug data dumping
 	//FILE *fp=fopen("test_dump.bin", "wb");
@@ -914,17 +1276,16 @@ void CCC1200::Run()
 	last_refl_ping = time(nullptr);
 
 	fd_set rfds;
-	int maxfd = (fd > sockt) ? fd : sockt;
-
-	//float lmin = 144, pmin = 72, smin = 72;
 
 	while(keep_running)
 	{
 		FD_ZERO(&rfds);
 		FD_SET(fd, &rfds);
-		FD_SET(sockt, &rfds);
+		struct timeval tv;
+		tv.tv_sec = 0;
+		tv.tv_usec = 40000;
 
-		auto sval = select(maxfd+1, &rfds, nullptr, nullptr, nullptr);
+		auto sval = select(fd+1, &rfds, nullptr, nullptr, &tv);
 		if (sval < 0)
 		{
 			if (EINTR != errno)
@@ -961,7 +1322,7 @@ void CCC1200::Run()
 				flt_buff.Push(raw_bsb_rx[ii]);
 
 				// filter the buffer to get the new sample
-				f_sample = 0.0f;
+				float f_sample = 0.0f;
 				for(uint8_t i=0; i<flt_buff.Size(); i++)
 					f_sample += rrc_taps_5[i] * float(flt_buff[i]);
 
@@ -1281,324 +1642,8 @@ void CCC1200::Run()
 				}
 			}
 		}
-
-		//receive a packet - blocking
-		if (FD_ISSET(sockt, &rfds))
-		{
-			auto bsize = sizeof(rx_buff);
-			rx_len = recvfrom(sockt, rx_buff, bsize, 0, (struct sockaddr*)&saddr, (socklen_t*)&saddr_size);
-
-			//debug
-			//printMsg(0, "Size:%d\nPayload:%s\n", rx_len, rx_buff);
-
-			//PING-PONG
-			if(strstr((char*)rx_buff, "PING")==(char*)rx_buff)
-			{
-				last_refl_ping = time(nullptr);
-				sprintf((char*)tx_buff, "PONGxxxxxx"); //that "xxxxxx" is just a placeholder
-				memcpy(&tx_buff[4], config.enc_node, sizeof(config.enc_node));
-				refl_send(tx_buff, 4+6); //PONG
-				//printMsg(TC_YELLOW, "PING\n");
-			}
-
-			//M17 stream frame data - "Steaming Mode IP Packet, Single Packet Method"
-			else if(strstr((char*)rx_buff, "M17 ")==(char*)rx_buff)
-			{
-				tx_timer = getMS();
-
-				m17stream.sid=((uint16_t)rx_buff[4]<<8)|rx_buff[5];
-				m17stream.fn=((uint16_t)rx_buff[34]<<8)|rx_buff[35];
-				static uint8_t dst_call[10]={0};
-				static uint8_t src_call[10]={0};
-				memcpy(m17stream.pld, &rx_buff[(32+16+224+16)/8U], 16);
-
-				int8_t frame_symbols[SYM_PER_FRA];						//raw frame symbols
-				int8_t bsb_samples[963] = {CMD_TX_DATA, -61, 3};	//baseband samples wrapped in a frame
-
-				if(tx_state==TX_IDLE) //first received frame
-				{
-					tx_state=TX_ACTIVE;
-
-					//TODO: this needs to happen every time a new transmission appears
-					//stopRx();
-					//printMsg(0, "RX stop\n");
-					usleep(10e3);
-
-					//extract data
-					memcpy(m17stream.lsf.dst, "\xFF\xFF\xFF\xFF\xFF\xFF", 6);
-					memcpy(m17stream.lsf.src, &rx_buff[6+6], 6);
-					decode_callsign_bytes(dst_call, m17stream.lsf.dst);
-					decode_callsign_bytes(src_call, m17stream.lsf.src);
-
-					//set TYPE field
-					memcpy(m17stream.lsf.type, &rx_buff[18], 2);
-					m17stream.lsf.type[1]|=0x2U<<5; //no encryption, so the subtype field defines the META field contents: extended callsign data
-
-					//generate META field
-					//remove trailing spaces and suffixes
-					uint8_t trimmed_src[10], enc_trimmed_src[6];
-					for(uint8_t i=0; i<10; i++)
-					{
-						if(src_call[i]!=' ')
-							trimmed_src[i]=src_call[i];
-						else
-						{
-							trimmed_src[i]=0;
-							break;
-						}
-					}
-					encode_callsign_bytes(enc_trimmed_src, trimmed_src);
-
-					uint8_t ext_ref[12], enc_ext_ref[6];
-					sprintf((char*)ext_ref, "%s %c", config.reflector, config.module);
-					encode_callsign_bytes(enc_ext_ref, ext_ref);
-
-					memcpy(&m17stream.lsf.meta[0], m17stream.lsf.src, 6); //originator
-					memcpy(&m17stream.lsf.meta[6], enc_ext_ref, 6); //reflector
-					memset(&m17stream.lsf.meta[12], 0, 2);
-					memcpy(m17stream.lsf.src, enc_trimmed_src, 6);
-
-					//append CRC
-					uint16_t ccrc=LSF_CRC(&m17stream.lsf);
-					m17stream.lsf.crc[0]=ccrc>>8;
-					m17stream.lsf.crc[1]=ccrc&0xFF;
-
-					//log to file
-					if(logfile)
-					{
-						const auto rawtime = time(nullptr);
-						const auto timeinfo=localtime(&rawtime);
-						fprintf(logfile, "\"%02d:%02d:%02d\" \"%s\" \"%s\" \"Internet\" \"--\" \"--\"\n",
-							timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec,
-							src_call, dst_call);
-					}
-
-					timeStamp();
-					printMsg(TC_GREEN, " Stream TX start\n");
-
-					//stop RX, set PA_EN=1 and initialize TX
-					while (stopRx())
-						usleep(40e3);
-					usleep(2e3);
-					while (startTx())
-						usleep(40e3);
-					usleep(10e3);
-
-					//flush the RRC baseband filter
-					filterSymbols(nullptr, nullptr, nullptr, 0);
-				
-					//generate frame symbols, filter them and send out to the device
-					//we need to prepare 3 frames to begin the transmission - preamble, LSF and stream frame 0
-					//let's start with the preamble
-					uint32_t frame_buff_cnt=0;
-					gen_preamble_i8(frame_symbols, &frame_buff_cnt, PREAM_LSF);
-
-					//filter and send out to the device
-					filterSymbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
-					writeDev(bsb_samples, sizeof(bsb_samples), "SM Pream");
-
-					//now the LSF
-					gen_frame_i8(frame_symbols, nullptr, FRAME_LSF, &(m17stream.lsf), 0, 0);
-
-					//filter and send out to the device
-					filterSymbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
-					writeDev(bsb_samples, sizeof(bsb_samples), "SM LSF");
-
-					//finally, the first frame
-					gen_frame_i8(frame_symbols, m17stream.pld, FRAME_STR, &(m17stream.lsf), (m17stream.fn&0x7FFFU)%6, m17stream.fn);
-
-					//filter and send out to the device
-					filterSymbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
-					writeDev(bsb_samples, sizeof(bsb_samples), "SM first Frame");
-				}
-				else
-				{
-					//only one frame is needed
-					gen_frame_i8(frame_symbols, m17stream.pld, FRAME_STR, &(m17stream.lsf), (m17stream.fn&0x7FFFU)%6, m17stream.fn);
-
-					//filter and send out to the device
-					filterSymbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
-					writeDev(bsb_samples, sizeof(bsb_samples), "SM Frame");
-				}
-
-				if(m17stream.fn&0x8000U) //last stream frame
-				{
-					//send the final EOT marker
-					uint32_t frame_buff_cnt=0;
-					gen_eot_i8(frame_symbols, &frame_buff_cnt);
-
-					//filter and send out to the device
-					filterSymbols(bsb_samples+3, frame_symbols, rrc_taps_5_poly, 0);
-					writeDev(bsb_samples, sizeof(bsb_samples), "SM EOT");
-
-					timeStamp();
-					printMsg(TC_GREEN, " Stream TX end\n");
-					usleep(8*40e3); //wait 320ms (8 M17 frames) - let the transmitter consume all the buffered samples
-
-					//restart RX
-					while (stopTx())
-						usleep(40e3);
-					while (startRx())
-						usleep(40e3);
-					timeStamp();
-					printMsg(TC_GREEN, " RX start\n");
-
-					tx_state=TX_IDLE;
-				}
-			}
-
-			//M17 packet data - "Packet Mode IP Packet"
-			else if(strstr((char*)rx_buff, "M17P")==(char*)rx_buff)
-			{
-				timeStamp();
-				printMsg(TC_GREEN, " M17 Inet packet received\n");
-
-				uint8_t call_dst[10], call_src[10], can, type;
-				decode_callsign_bytes(call_dst, &rx_buff[4+0]);
-				decode_callsign_bytes(call_src, &rx_buff[4+6]);
-				can=(*((uint16_t*)&rx_buff[4+6+6])>>7)&0xF;
-				type=rx_buff[4+240/8];
-				
-				printMsg(TC_DEFAULT, " ├ "); printMsg(TC_YELLOW, "DST: "); printMsg(TC_DEFAULT, "%s\n", call_dst);
-				printMsg(TC_DEFAULT, " ├ "); printMsg(TC_YELLOW, "SRC: "); printMsg(TC_DEFAULT, "%s\n", call_src);
-				printMsg(TC_DEFAULT, " ├ "); printMsg(TC_YELLOW, "CAN: "); printMsg(TC_DEFAULT, "%d\n", can);
-				if(type!=5) //assuming 1-byte type specifier
-				{
-					printMsg(TC_DEFAULT, " └ "); printMsg(TC_YELLOW, "TYPE: "); printMsg(TC_DEFAULT, "%d\n", type);
-				}
-				else
-				{
-					printMsg(TC_DEFAULT, " ├ "); printMsg(TC_YELLOW, "TYPE: "); printMsg(TC_DEFAULT, "SMS\n");
-					printMsg(TC_DEFAULT, " └ "); printMsg(TC_YELLOW, "MSG: ");  printMsg(TC_DEFAULT, "%s\n", &rx_buff[4+240/8+1]);
-				}
-
-				//TODO: handle TX here
-				int8_t frame_symbols[SYM_PER_FRA];						//raw frame symbols
-				int8_t bsb_samples[SYM_PER_FRA*5];						//filtered baseband samples = symbols*sps
-				uint8_t bsb_chunk[963] = {CMD_TX_DATA, 0xC3, 0x03};		//baseband samples wrapped in a frame
-
-				if(logfile)
-				{
-					const auto rawtime = time(nullptr);
-					const auto timeinfo=localtime(&rawtime);
-					fprintf(logfile, "\"%02d:%02d:%02d\" \"%s\" \"%s\" \"Internet\" \"--\" \"--\"\n", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec, call_src, call_dst);
-				}
-				
-				timeStamp();
-				printMsg(TC_GREEN, " Packet TX start\n");
-
-				//stop RX, set PA_EN=1 and initialize TX
-				while (stopRx())
-					usleep(40e3);
-				usleep(2e3);
-
-				while (startTx())
-					usleep(40e3);
-				usleep(10e3);
-				
-				//flush the RRC baseband filter
-				filterSymbols(nullptr, nullptr, nullptr, 0);
-				
-				//generate frame symbols, filter them and send out to the device
-				//we need to prepare 3 frames to begin the transmission - preamble, LSF and stream frame 0
-				//let's start with the preamble
-				uint32_t frame_buff_cnt=0;
-				gen_preamble_i8(frame_symbols, &frame_buff_cnt, PREAM_LSF);
-				
-				//filter and send out to the device
-				filterSymbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
-				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-				writeDev(bsb_samples, sizeof(bsb_samples), "PM LSF Pream");
-				
-				//now the LSF
-				gen_frame_i8(frame_symbols, nullptr, FRAME_LSF, (lsf_t*)&rx_buff[4], 0, 0);
-				
-				//filter and send out to the device
-				filterSymbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
-				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-				writeDev(bsb_samples, sizeof(bsb_samples), "PM LSF");
-				
-				//packet frames
-				uint16_t pld_len=rx_len-(4+240/8); //"M17P" plus 240-bit LSD
-				uint8_t frame=0;
-				uint8_t pld[26];
-				
-				while(pld_len>25)
-				{
-					memcpy(pld, &rx_buff[4+240/8+frame*25], 25);
-					pld[25]=frame<<2;
-					gen_frame_i8(frame_symbols, pld, FRAME_PKT, nullptr, 0, 0);
-					filterSymbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
-					memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-					writeDev(bsb_samples, sizeof(bsb_samples), "PM Frame");
-					pld_len-=25;
-					frame++;
-					usleep(40*1000U);
-				}
-				memset(pld, 0, 26);
-				memcpy(pld, &rx_buff[4+240/8+frame*25], pld_len);
-				pld[25]=(1<<7)|(pld_len<<2); //EoT flag set, amount of remaining data in the 'frame number' field
-				gen_frame_i8(frame_symbols, pld, FRAME_PKT, nullptr, 0, 0);
-				filterSymbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
-				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-				writeDev(bsb_samples, sizeof(bsb_samples), "PM Frame");
-				usleep(40*1000U);
-
-				//now the final EOT marker
-				frame_buff_cnt=0;
-				gen_eot_i8(frame_symbols, &frame_buff_cnt);
-
-				//filter and send out to the device
-				filterSymbols(bsb_samples, frame_symbols, rrc_taps_5_poly, 0);
-				memcpy(&bsb_chunk[3], bsb_samples, sizeof(bsb_samples));
-				writeDev(bsb_samples, sizeof(bsb_samples), "PM EOT");
-
-				timeStamp();
-				printMsg(TC_GREEN, " PKT TX end\n");
-				usleep(3*40e3); //wait 120ms (3 M17 frames)
-
-				//restart RX
-				while (stopTx())
-					usleep(40e3);
-				while (startRx())
-					usleep(40e3);
-				timeStamp();
-				printMsg(TC_GREEN, " RX start\n");
-
-				tx_state = TX_IDLE;
-			}
-
-			//clear the rx_buff
-			memset((uint8_t*)rx_buff, 0, rx_len);
-		}
-
-		//tx timeout
-		if(tx_state==TX_ACTIVE && (getMS()-tx_timer)>240) //240ms timeout
-		{
-			timeStamp();
-			printMsg(TC_GREEN, " TX timeout\n");
-			//usleep(10*40e3); //wait 400ms (10 M17 frames)
-
-			//restart RX
-			while (stopTx())
-				usleep(40e3);
-			while (startRx())
-				usleep(40e3);
-			timeStamp();
-			printMsg(TC_GREEN, " RX start\n");
-
-			tx_state=TX_IDLE;
-		}
-
-		//connection with the reflector borken
-		if(time(nullptr)-last_refl_ping>30)
-		{
-			keep_running = false;
-			//for now, just cry about it and quit
-			printMsg(TC_RED, "Lost connection with the reflector\nExiting");
-		}
 	}
-	printMsg(TC_GREEN, "run loop terminated\n");
+	printMsg(TC_GREEN, "Rx loop terminated\n");
 }
 
 /**
@@ -1635,7 +1680,7 @@ int main()
 		modem.Stop();
 		return EXIT_FAILURE;
 	}
-	modem.Run();
+	pause();
 
 	modem.Stop();
 

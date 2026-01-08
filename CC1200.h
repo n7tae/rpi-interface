@@ -18,21 +18,23 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <string>
+#include <future>
 #include <termios.h>
 #include <unistd.h>
 #include <gpiod.h>
-#include <string>
-#include <cstdint>
 
 class CCC1200
 {
 public:
 	bool Start();
 	void Stop();
-	void Run();
 
 private:
+	void rxProcess(void);
+	void txProcess(void);
 	void printMsg(const char* color_code, const char* fmt, ...);
 	void timeStamp(void);
 	uint32_t getMS(void);
@@ -58,7 +60,10 @@ private:
 	float sed(const float *v1, const int8_t *v2, const unsigned len) const;
 	void filterSymbols(int8_t* __restrict out, const int8_t* __restrict in, const float* __restrict flt, uint8_t phase_inv);
 
+	std::future<void> rxFuture, txFuture;
+
 	int fd = -1; // the handle to the CC1200
+	FILE *logfile = nullptr;
 	// gpiod pointers
 	struct gpiod_chip *gpio_chip = nullptr;
 	struct gpiod_line_request *boot0_line = nullptr;
